@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    AI 教练的 Base URL 完全由用户填写，可能是：
+      · https://api.deepseek.com/v1（官方）
+      · https://xxx.com/v1（第三方中转站）
+      · http://192.168.1.8:11434/v1（局域网 Ollama）
+
+    后两种经常是明文 HTTP。Android 9 起默认禁止明文，不放开的话
+    用户填了地址只会得到一句莫名其妙的 "Cleartext HTTP traffic not permitted"。
+
+    这里放开明文，但**信任锚仍然只信系统证书**（不信任用户安装的中间人证书），
+    所以是「允许 http」而不是「允许被随便劫持」。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -1,0 +1,60 @@
+FitGym
+Copyright (C) 2026 FitGym contributors
+
+本项目整体以 GNU Affero General Public License v3.0 授权，全文见 LICENSE。
+
+本文件记录仓库中「版权不属于本项目」的第三方内容及其授权条件。它们不因本项目
+采用 AGPL 而变成 AGPL 内容，使用、再分发或商用前请按各自条款处理。
+
+
+1. 内置动作库数据
+   文件：app/src/main/assets/exercises.json、app/src/main/assets/taxonomy.json
+   来源：openGym —— https://github.com/DuarteSantos8/openGym（catalogue/ 目录）
+   上游状态：openGym 自身代码采用 GNU AGPL-3.0，其 README 声明「catalogue/ 中的
+             练习文本属于 openGym，并接受社区贡献」。
+   与本项目的关系：两者同为 AGPL-3.0，取用其数据不产生额外的许可证冲突，来源
+                   标注与版权声明仍按 AGPL 要求保留。
+   加工说明：本仓库用 tools/build_catalogue.py 从中筛出徒手 + 有氧动作，合并中文
+             名称与步骤，并补充 branch / skillLevel 等本 App 专用字段。字段结构是
+             本项目的设计，文字内容来自上游。
+
+
+2. 动作演示图
+   文件：app/src/main/assets/gifs/*.webp（共 2303 张）
+   版权：© Aliaksandr Makatserchyk, Gym visual —— https://gymvisual.com/
+   上游授权范围（引自 openGym README 的 Important 段）：
+     「The exercise media is not covered by that license. The stills and
+      animations are © Aliaksandr Makatserchyk, Gym visual, licensed for use in
+      openGym only: 180 px in this repository and on self-hosted servers, larger
+      only inside the app packages. A non-commercial fork may keep them
+      unmodified with the notice; anything else needs your own licence from
+      gymvisual.com.」
+   即：这些图仅授权给 openGym 使用；非商业性质的 fork 可以原样保留并附本声明，
+       其余用途需要自行向 gymvisual.com 取得授权。
+   ★ 这一项不受本项目 AGPL 授权影响，也无法由本项目转授。再分发、商用或以本 App
+     上架应用商店前，必须单独解决。
+
+
+3. 人体肌肉图几何数据
+   文件：app/src/main/assets/anatomy/body-paths.json
+   来源：openGym frontend/src/lib/body-paths.js（由 tools/extract_anatomy.py 提取）
+   原始图形：MuscleMap by Melih Colpan —— MIT License
+   说明：上游文件标注「Generated — do not hand-edit」，本项目只做结构归一化
+         （重排为 JSON、按视图分组），path 字符串原样保留。MIT 许可证要求保留
+         上述版权与许可声明，故记录于此。MIT 与 AGPL 兼容，可继续随本项目分发。
+
+
+4. 提示音
+   文件：app/src/main/res/raw/tick.wav、go.wav、done.wav
+   来源：由 tools/make_beeps.py 用正弦波 + 指数包络现场合成，不含任何采样素材，
+         随本项目一并按 AGPL 授权。
+
+
+5. 应用图标
+   文件：app/src/main/res/drawable/ic_launcher.xml 等
+   来源：本项目自绘，随本项目一并按 AGPL 授权。
+
+
+依赖库（AndroidX、Compose、Room、Coil、kotlinx.serialization 等）各自遵循其原有
+许可证（以 Apache-2.0 为主，与 AGPL 兼容），构建产物中的第三方声明由 AGP 自动汇总，
+不在本文件重复罗列。

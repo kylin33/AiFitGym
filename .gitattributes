@@ -1,0 +1,73 @@
+# ============================================================
+# 换行符策略
+# ------------------------------------------------------------
+# Windows 开发机默认 core.autocrlf=true，会把工作区的 LF 悄悄换成 CRLF 再提交。
+# 不锁死的话，Linux/macOS 开发者 clone 下来执行 ./gradlew 会报
+#     /bin/sh^M: bad interpreter
+# 所以这里统一：仓库内一律存 LF，检出也一律 LF，需要 CRLF 的只有 Windows 脚本。
+# ============================================================
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF，cmd.exe 对单独的 LF 解析会出错
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# shell 脚本与 Gradle wrapper 必须 LF，否则在 Unix 上无法直接执行
+*.sh     text eol=lf
+gradlew  text eol=lf
+
+# 源码与配置（显式列出，避免被上面的规则或本地 core.autocrlf 干扰）
+*.kt         text eol=lf
+*.kts        text eol=lf
+*.java       text eol=lf
+*.xml        text eol=lf
+*.json       text eol=lf
+*.toml       text eol=lf
+*.pro        text eol=lf
+*.properties text eol=lf
+*.md         text eol=lf
+*.txt        text eol=lf
+*.py         text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.gitignore  text eol=lf
+.gitattributes text eol=lf
+
+# ============================================================
+# 二进制：声明成 binary 后 git 不再做 eol 转换与文本 diff，
+# 既避免误判把 webp 当文本改坏，也让 diff 直接显示「二进制文件已更改」。
+# ============================================================
+*.jar      binary
+*.apk      binary
+*.aab      binary
+*.keystore binary
+*.jks      binary
+
+*.webp binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.mp4 binary
+*.webm binary
+
+# ============================================================
+# GitHub 语言统计
+# ------------------------------------------------------------
+# 内置动作包是脚本从上游生成并 vendored 进来的数据（2.4 MB JSON + 2303 张 webp），
+# 不标出来的话仓库语言占比会被 JSON 顶到第一，掩盖真正的 Kotlin 源码。
+# ============================================================
+app/src/main/assets/** linguist-vendored
+
+# Room 导出的建表快照，机器生成，不需要人工 review
+app/schemas/** linguist-generated

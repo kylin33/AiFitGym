@@ -1,0 +1,119 @@
+{
+  "bodyParts": [
+    {
+      "value": "upper legs",
+      "label": "大腿",
+      "count": 694
+    },
+    {
+      "value": "waist",
+      "label": "腰腹",
+      "count": 506
+    },
+    {
+      "value": "back",
+      "label": "背部",
+      "count": 275
+    },
+    {
+      "value": "shoulders",
+      "label": "肩部",
+      "count": 151
+    },
+    {
+      "value": "chest",
+      "label": "胸部",
+      "count": 147
+    },
+    {
+      "value": "lower legs",
+      "label": "小腿",
+      "count": 134
+    },
+    {
+      "value": "full body",
+      "label": "全身",
+      "count": 126
+    },
+    {
+      "value": "cardio",
+      "label": "心肺",
+      "count": 93
+    },
+    {
+      "value": "upper arms",
+      "label": "上臂",
+      "count": 86
+    },
+    {
+      "value": "lower arms",
+      "label": "前臂",
+      "count": 48
+    },
+    {
+      "value": "neck",
+      "label": "颈部",
+      "count": 43
+    }
+  ],
+  "categories": [
+    {
+      "value": "calisthenics",
+      "label": "徒手体操",
+      "count": 865
+    },
+    {
+      "value": "stretching",
+      "label": "拉伸",
+      "count": 408
+    },
+    {
+      "value": "mobility",
+      "label": "灵活度",
+      "count": 253
+    },
+    {
+      "value": "plyometrics",
+      "label": "爆发力",
+      "count": 180
+    },
+    {
+      "value": "cardio",
+      "label": "有氧",
+      "count": 145
+    },
+    {
+      "value": "isometric",
+      "label": "等长收缩",
+      "count": 134
+    },
+    {
+      "value": "yoga",
+      "label": "瑜伽",
+      "count": 109
+    },
+    {
+      "value": "strength",
+      "label": "力量",
+      "count": 104
+    },
+    {
+      "value": "pilates",
+      "label": "普拉提",
+      "count": 47
+    },
+    {
+      "value": "combat",
+      "label": "搏击",
+      "count": 36
+    },
+    {
+      "value": "rehab",
+      "label": "康复",
+      "count": 22
+    }
+  ],
+  "total": 2303,
+  "withChineseSteps": 336,
+  "withChineseName": 2303
+}
