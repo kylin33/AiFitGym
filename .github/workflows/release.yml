@@ -3,11 +3,14 @@ name: Release APK
 # 打一个 v 开头的 tag 就出包，例如：
 #   git tag -a v1.0.0 -m "1.0.0" && git push origin v1.0.0
 #
-# 需要先在仓库的 Settings → Secrets and variables → Actions 里配四个 secret：
+# 需要先在仓库的 Settings → Secrets and variables → Actions 里配三个 secret：
 #   KEYSTORE_BASE64      keystore/fitgym-release.jks 的 base64 字符串
 #   KEYSTORE_PASSWORD    storePassword
 #   KEY_ALIAS            keyAlias
-#   KEY_PASSWORD         keyPassword
+#
+# 没有 KEY_PASSWORD：这个 keystore 是 PKCS12 格式（keytool 现在的默认值），
+# 整个库只有一个密码，JDK 会直接忽略 -keypass。多配一个「验证不了的 secret」
+# 只会多一个打包时才爆的失败点 —— 真换成 JKS 且 key 密码独立时再改回来。
 #
 # 生成 KEYSTORE_BASE64（注意别换行，Windows 上用 -w 0）：
 #   base64 -w 0 keystore/fitgym-release.jks
@@ -46,21 +49,77 @@ jobs:
       - name: Check signing secrets
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::缺少 KEYSTORE_BASE64，无法签名 release 包。请在 Settings → Secrets 里补齐四个签名 secret。"
+            echo "::error::缺少 KEYSTORE_BASE64，无法签名 release 包。请在 Settings → Secrets 里补齐三个签名 secret（KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS）。"
             exit 1
           fi
 
       - name: Decode keystore
+        # 密码走 env 而不是直接 ${{ }} 插值进脚本：插值发生在 bash 解析之前，
+        # 值里只要有个反引号或 $ 就会被当成代码执行掉。走 env + 引号才安全。
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
+          set -euo pipefail
           mkdir -p keystore
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > keystore/fitgym-release.jks
-          cat > keystore.properties <<EOF
-          storeFile=keystore/fitgym-release.jks
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          EOF
-          echo "keystore 已就绪（$(stat -c%s keystore/fitgym-release.jks) 字节）"
+
+          # 从聊天窗口、密码管理器、记事本复制密码时，十有八九会带上尾随空格或换行。
+          # 这个 keystore 是 PKCS12，密码整体参与校验，多一个空格就报
+          # "keystore password was incorrect" —— 而报错完全不提空格，极难排查。
+          # 所以这里先裁掉首尾空白再使用。
+          trim() {
+            local s="$1"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          STORE_PW="$(trim "${STORE_PASSWORD:-}")"
+          ALIAS="$(trim "${KEY_ALIAS:-}")"
+
+          if [ -z "$STORE_PW" ]; then
+            echo "::error::KEYSTORE_PASSWORD 为空，请到 Settings → Secrets 里补上。"
+            exit 1
+          fi
+          if [ -z "$ALIAS" ]; then
+            echo "::error::KEY_ALIAS 为空（应为 fitgym）。"
+            exit 1
+          fi
+
+          # PKCS12 只有一个密码，key 密码就是 store 密码。不读 KEY_PASSWORD：
+          # keytool 对 PKCS12 的 -keypass 是直接忽略的，那份值既验证不了也用不上，
+          # 留在链路里只会变成一个打包阶段才爆的失败点。
+          KEY_PW="$STORE_PW"
+
+          echo "长度核对：store=${#STORE_PW} alias=${#ALIAS}"
+          [ "${#STORE_PW}" -eq 24 ] || echo "::warning::KEYSTORE_PASSWORD 长度为 ${#STORE_PW}，本项目的密码是 24 位，值可能不对。"
+
+          # keytool 不一定在 PATH 里（本地 Windows 就常常没有），优先用 JAVA_HOME 下的
+          KEYTOOL="keytool"
+          if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/keytool" ]; then
+            KEYTOOL="$JAVA_HOME/bin/keytool"
+          fi
+
+          # 逐项验证，失败时点名是哪一个 secret 的问题，而不是让 AGP 在打包时才炸
+          if ! "$KEYTOOL" -list -keystore keystore/fitgym-release.jks -storepass "$STORE_PW" >/dev/null 2>&1; then
+            echo "::error::KEYSTORE_PASSWORD 打不开 keystore（长度 ${#STORE_PW}）。请与本地 keystore.properties 逐字核对。"
+            exit 1
+          fi
+          if ! "$KEYTOOL" -list -keystore keystore/fitgym-release.jks -storepass "$STORE_PW" -alias "$ALIAS" >/dev/null 2>&1; then
+            echo "::error::KEY_ALIAS「$ALIAS」在 keystore 里不存在，应为 fitgym。"
+            exit 1
+          fi
+          # certreq 会真的去解私钥：别名指向的不是 PrivateKeyEntry、或库本身损坏，这里就会失败
+          if ! "$KEYTOOL" -certreq -alias "$ALIAS" -keystore keystore/fitgym-release.jks \
+                 -storepass "$STORE_PW" -keypass "$KEY_PW" -file /tmp/probe.csr >/dev/null 2>&1; then
+            echo "::error::别名 $ALIAS 下的私钥取不出来：请确认它是 PrivateKeyEntry，且 keystore 文件没有损坏。"
+            exit 1
+          fi
+
+          printf 'storeFile=keystore/fitgym-release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$STORE_PW" "$ALIAS" "$KEY_PW" > keystore.properties
+          echo "keystore 已就绪（$(stat -c%s keystore/fitgym-release.jks) 字节），密码与别名校验通过"
 
       # 插件解析失败时，光看 Gradle 的报错分不清是「源里没有」还是「源连不上」。
       # 先把几个关键地址的实际响应码打出来，重跑一次就知道该删哪个源。

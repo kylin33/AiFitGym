@@ -391,8 +391,16 @@ git tag -a v1.0.0 -m "1.0.0"
 git push origin v1.0.0
 ```
 
-需要先在仓库 Settings → Secrets 配好四项：`KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、
-`KEY_ALIAS`、`KEY_PASSWORD`（`base64 -w 0 keystore/fitgym-release.jks` 得到第一项）。
+需要先在仓库 Settings → Secrets 配好三项：`KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、
+`KEY_ALIAS`（`base64 -w 0 keystore/fitgym-release.jks` 得到第一项）。
+
+只有三项不是漏了：`keytool` 现在默认生成 **PKCS12** 密钥库，一个库只有一个密码，
+JDK 会直接忽略 `-keypass`。所以 `keyPassword` 就用 store 密码，不单独配 secret——
+多一个无法提前验证的值，只会多一个打包到一半才爆的失败点。
+
+密码粘贴时常见的尾随空格会让 PKCS12 报 `keystore password was incorrect`（报错里
+完全看不出空格的存在），工作流里会先裁剪首尾空白，再用 `keytool -list` 预校验，
+失败时直接点名是哪个 secret 出了问题。
 
 不想等 CI 也可以本地出包：
 
