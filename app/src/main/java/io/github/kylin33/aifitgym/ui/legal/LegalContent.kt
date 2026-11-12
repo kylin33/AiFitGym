@@ -33,7 +33,7 @@ object LegalContent {
      * [CONTACT_EMAIL] 留空时页面只显示仓库 Issues 链接 —— 与其编一个
      * 没人看的邮箱，不如指向一个真的会有人回复的地方。
      */
-    const val REPO_URL = "https://github.com/kylin33/FitGym"
+    const val REPO_URL = "https://github.com/kylin33/AiFitGym"
     const val CONTACT_EMAIL = ""
 
     // ── 隐私政策 ────────────────────────────────────────────────────────

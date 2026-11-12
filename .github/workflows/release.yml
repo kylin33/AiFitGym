@@ -31,11 +31,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # 必须和 gradle/gradle-daemon-jvm.properties 里的 toolchainVersion 对上，
+      # 否则 Gradle 会去 foojay 现场下载 JDK（慢，而且离线就失败）
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '25'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -59,6 +61,18 @@ jobs:
           keyPassword=${{ secrets.KEY_PASSWORD }}
           EOF
           echo "keystore 已就绪（$(stat -c%s keystore/fitgym-release.jks) 字节）"
+
+      # 插件解析失败时，光看 Gradle 的报错分不清是「源里没有」还是「源连不上」。
+      # 先把几个关键地址的实际响应码打出来，重跑一次就知道该删哪个源。
+      - name: Check repositories
+        run: |
+          for u in \
+            https://repo.maven.apache.org/maven2/ \
+            https://dl.google.com/dl/android/maven2/ \
+            https://plugins.gradle.org/m2/ \
+            https://maven.aliyun.com/repository/central/ ; do
+            printf '%-52s %s\n' "$u" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$u" || echo 'unreachable')"
+          done
 
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --console=plain

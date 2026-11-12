@@ -100,7 +100,7 @@ App 本身不内置任何第三方分析、广告、推送或社交 SDK。
 ## 10. 联系方式
 
 对这份政策有疑问，或发现了与描述不符的行为，请在
-[项目仓库](https://github.com/kylin33/FitGym/issues) 提 Issue。
+[项目仓库](https://github.com/kylin33/AiFitGym/issues) 提 Issue。
 
 ---
 
