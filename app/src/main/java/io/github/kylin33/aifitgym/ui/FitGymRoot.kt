@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -84,6 +85,9 @@ object Routes {
 
     /** 全屏跟练页。 */
     const val WORKOUT = "workout/{$ROUTINE_ID}"
+
+    /** 接着上次没做完的训练继续；单独一条路由，避免和 workout/{routineId} 的参数解析撞车。 */
+    const val RESUME_WORKOUT = "resume_workout"
 
     /** 历史详情页。 */
     const val SESSION_ID = "sessionId"
@@ -188,6 +192,7 @@ private fun AppNavHost(
     val pickerViewModel: ExercisePickerViewModel = viewModel(factory = ExercisePickerViewModel.Factory(container))
 
     val routines by routineListViewModel.routines.collectAsStateWithLifecycle()
+    val checkpoint by routineListViewModel.checkpoint.collectAsStateWithLifecycle()
     val exercises by libraryViewModel.exercises.collectAsStateWithLifecycle()
     val query by libraryViewModel.query.collectAsStateWithLifecycle()
     val gymEquipmentVisible by libraryViewModel.gymEquipmentVisible.collectAsStateWithLifecycle()
@@ -291,6 +296,9 @@ private fun AppNavHost(
                             onOpenCoach = { navController.navigate(Routes.COACH) },
                             onDeleteRoutine = routineListViewModel::delete,
                             onUndoDelete = routineListViewModel::undoDelete,
+                            checkpoint = checkpoint,
+                            onResumeSession = { navController.navigate(Routes.RESUME_WORKOUT) },
+                            onDiscardCheckpoint = routineListViewModel::discardCheckpoint,
                         )
 
                         1 -> SkillTreeScreen(
@@ -418,29 +426,12 @@ private fun AppNavHost(
             arguments = listOf(navArgument(Routes.ROUTINE_ID) { type = NavType.LongType }),
         ) { entry ->
             val routineId = entry.arguments?.getLong(Routes.ROUTINE_ID) ?: -1L
-            // key 带上 routineId：不同计划的跟练会话互不影响，返回时随 back stack 一起销毁
-            val workoutViewModel: WorkoutSessionViewModel = viewModel(
-                key = "workout-$routineId",
-                factory = WorkoutSessionViewModel.Factory(container),
-            )
-            LaunchedEffect(routineId) { workoutViewModel.start(routineId) }
-            // 通知栏倒计时要在锁屏时也看得见，进跟练页顺手把权限要了
-            RequestWorkoutNotificationPermission()
-
-            val workoutState by workoutViewModel.state.collectAsStateWithLifecycle()
-
-            ActiveWorkoutScreen(
-                state = workoutState,
-                onAdjustReps = workoutViewModel::adjustReps,
-                onCompleteSet = workoutViewModel::completeSet,
-                onFinishTimedSet = workoutViewModel::finishTimedSetEarly,
-                onSkipRest = workoutViewModel::skipRest,
-                onExtendRest = { workoutViewModel.extendRest() },
-                onToggleBackup = workoutViewModel::toggleBackup,
-                onFinishEarly = workoutViewModel::finishEarly,
-                onDismissPromotions = workoutViewModel::dismissPromotions,
-                onSwapPromoted = workoutViewModel::swapPromotedToNext,
-                onExit = { navController.popBackStack() },
+            WorkoutRoute(
+                container = container,
+                navController = navController,
+                // key 带上 routineId：不同计划的跟练会话互不影响，返回时随 back stack 一起销毁
+                viewModelKey = "workout-$routineId",
+                start = { it.start(routineId) },
             )
         }
 
@@ -450,27 +441,21 @@ private fun AppNavHost(
             arguments = listOf(navArgument(Routes.EXERCISE_ID) { type = NavType.StringType }),
         ) { entry ->
             val exerciseId = entry.arguments?.getString(Routes.EXERCISE_ID).orEmpty()
-            val workoutViewModel: WorkoutSessionViewModel = viewModel(
-                key = "workout-exercise-$exerciseId",
-                factory = WorkoutSessionViewModel.Factory(container),
+            WorkoutRoute(
+                container = container,
+                navController = navController,
+                viewModelKey = "workout-exercise-$exerciseId",
+                start = { it.startSingle(exerciseId) },
             )
-            LaunchedEffect(exerciseId) { workoutViewModel.startSingle(exerciseId) }
-            RequestWorkoutNotificationPermission()
+        }
 
-            val workoutState by workoutViewModel.state.collectAsStateWithLifecycle()
-
-            ActiveWorkoutScreen(
-                state = workoutState,
-                onAdjustReps = workoutViewModel::adjustReps,
-                onCompleteSet = workoutViewModel::completeSet,
-                onFinishTimedSet = workoutViewModel::finishTimedSetEarly,
-                onSkipRest = workoutViewModel::skipRest,
-                onExtendRest = { workoutViewModel.extendRest() },
-                onToggleBackup = workoutViewModel::toggleBackup,
-                onFinishEarly = workoutViewModel::finishEarly,
-                onDismissPromotions = workoutViewModel::dismissPromotions,
-                onSwapPromoted = workoutViewModel::swapPromotedToNext,
-                onExit = { navController.popBackStack() },
+        // 首页横幅点「继续训练」进这里：同一个状态机，只是入口换成从检查点恢复位置
+        composable(Routes.RESUME_WORKOUT) {
+            WorkoutRoute(
+                container = container,
+                navController = navController,
+                viewModelKey = "workout-resume",
+                start = { it.resume() },
             )
         }
 
@@ -623,3 +608,43 @@ private fun AppNavHost(
         }
     }
 }
+
+/**
+ * 三个跟练入口（计划 / 考级 / 崩溃恢复）共用的那一层。
+ *
+ * 它们渲染的是同一个状态机和同一个界面，区别只在「怎么开始」——
+ * 抽出来是为了让新增入口时不会漏掉通知权限、也不会让三个副本慢慢长歪。
+ * ViewModel 用不同 key 建，互不干扰。
+ */
+@Composable
+private fun WorkoutRoute(
+    container: AppContainer,
+    navController: NavHostController,
+    viewModelKey: String,
+    start: (WorkoutSessionViewModel) -> Unit,
+) {
+    val workoutViewModel: WorkoutSessionViewModel = viewModel(
+        key = viewModelKey,
+        factory = WorkoutSessionViewModel.Factory(container),
+    )
+    LaunchedEffect(viewModelKey) { start(workoutViewModel) }
+    // 通知栏倒计时要在锁屏时也看得见，进跟练页顺手把权限要了
+    RequestWorkoutNotificationPermission()
+
+    val workoutState by workoutViewModel.state.collectAsStateWithLifecycle()
+
+    ActiveWorkoutScreen(
+        state = workoutState,
+        onAdjustReps = workoutViewModel::adjustReps,
+        onCompleteSet = workoutViewModel::completeSet,
+        onFinishTimedSet = workoutViewModel::finishTimedSetEarly,
+        onSkipRest = workoutViewModel::skipRest,
+        onExtendRest = { workoutViewModel.extendRest() },
+        onToggleBackup = workoutViewModel::toggleBackup,
+        onFinishEarly = workoutViewModel::finishEarly,
+        onDismissPromotions = workoutViewModel::dismissPromotions,
+        onSwapPromoted = workoutViewModel::swapPromotedToNext,
+        onExit = { navController.popBackStack() },
+    )
+}
+

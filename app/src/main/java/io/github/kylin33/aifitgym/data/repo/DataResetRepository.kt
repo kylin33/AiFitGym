@@ -1,6 +1,7 @@
 package io.github.kylin33.aifitgym.data.repo
 
 import androidx.room.withTransaction
+import io.github.kylin33.aifitgym.data.checkpoint.CheckpointStore
 import io.github.kylin33.aifitgym.data.local.AppMetaDao
 import io.github.kylin33.aifitgym.data.local.BranchProgressDao
 import io.github.kylin33.aifitgym.data.local.ExerciseDao
@@ -54,6 +55,9 @@ class DataResetRepository(
                 // AI 对话是基于旧训练数据聊出来的，清完数据再留着它只会误导下一位用户；
                 // 模型/密钥属于「设置」不是「数据」，保留（谁都不想重填一次 Key）
                 appMetaDao.remove(AI_CHAT_KEY)
+                // 未完成训练的检查点必须一起清：它指向的 sessionId 马上就要消失了，
+                // 留着会让首页弹一个点进去必然失败的「继续训练」
+                appMetaDao.remove(CheckpointStore.KEY)
             }
 
             // 事务外重放首启的那两步：它们本身幂等，正是为这种场合准备的。

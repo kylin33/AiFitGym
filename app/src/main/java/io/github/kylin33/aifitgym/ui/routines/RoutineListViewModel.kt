@@ -3,6 +3,7 @@ package io.github.kylin33.aifitgym.ui.routines
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import io.github.kylin33.aifitgym.data.checkpoint.ActiveSessionCheckpoint
 import io.github.kylin33.aifitgym.data.local.RoutineSummary
 import io.github.kylin33.aifitgym.data.repo.RoutineDetail
 import io.github.kylin33.aifitgym.di.AppContainer
@@ -24,9 +25,19 @@ sealed interface RoutineListEvent {
 class RoutineListViewModel(container: AppContainer) : ViewModel() {
 
     private val repository = container.routineRepository
+    private val checkpoints = container.checkpoints
 
     val routines: StateFlow<List<RoutineSummary>> = repository.observeSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 上次没做完的训练（如果有）。
+     *
+     * 用 Flow 监听而不是进页面读一次：跟练页收尾时会清掉检查点，
+     * 返回首页时横幅必须跟着消失 —— 而首页的 ViewModel 并没有被重建。
+     */
+    val checkpoint: StateFlow<ActiveSessionCheckpoint?> = checkpoints.observe()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _events = MutableSharedFlow<RoutineListEvent>(extraBufferCapacity = 4)
     val events: SharedFlow<RoutineListEvent> = _events.asSharedFlow()
@@ -67,6 +78,17 @@ class RoutineListViewModel(container: AppContainer) : ViewModel() {
                     _events.emit(RoutineListEvent.Failed("恢复失败：${it.message ?: "未知错误"}"))
                 }
         }
+    }
+
+    /**
+     * 放弃上次没做完的训练：只删检查点，不动数据库。
+     *
+     * 已经做完的那几组仍然留在历史里（可以点进去补完或删掉），
+     * 这里只是让首页不再弹「继续训练」。假装帮用户「结束」掉这次训练才是越界 ——
+     * 时长和成绩该怎么算，只有他自己知道。
+     */
+    fun discardCheckpoint() {
+        viewModelScope.launch { checkpoints.clear() }
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

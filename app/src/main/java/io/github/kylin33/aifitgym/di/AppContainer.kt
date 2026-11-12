@@ -8,6 +8,7 @@ import io.github.kylin33.aifitgym.data.ai.CoachChatStore
 import io.github.kylin33.aifitgym.data.ai.CoachContextBuilder
 import io.github.kylin33.aifitgym.data.ai.CoachRepository
 import io.github.kylin33.aifitgym.data.backup.BackupRepository
+import io.github.kylin33.aifitgym.data.checkpoint.CheckpointStore
 import io.github.kylin33.aifitgym.data.local.FitGymDatabase
 import io.github.kylin33.aifitgym.data.recovery.RecoveryRepository
 import io.github.kylin33.aifitgym.data.repo.DataResetRepository
@@ -60,6 +61,16 @@ class AppContainer(context: Context) {
         WorkoutRepository(database.routineDao(), database.exerciseDao(), database.workoutSessionDao())
     }
 
+    /**
+     * 未完成训练的检查点。
+     *
+     * 每组打卡时写一份，正常收尾时删掉；进程被杀之后首页靠它弹「继续训练」。
+     * 落 app_meta（键值表）而不是新建表，就省掉一次 Room 迁移。
+     */
+    val checkpoints: CheckpointStore by lazy {
+        CheckpointStore(database.appMetaDao())
+    }
+
     val skillRepository: SkillRepository by lazy {
         SkillRepository(
             progressDao = database.branchProgressDao(),
@@ -95,6 +106,7 @@ class AppContainer(context: Context) {
             routineDao = database.routineDao(),
             sessionDao = database.workoutSessionDao(),
             progressDao = database.branchProgressDao(),
+            appMetaDao = database.appMetaDao(),
         )
     }
 

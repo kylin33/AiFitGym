@@ -4,6 +4,9 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import io.github.kylin33.aifitgym.data.checkpoint.ActiveSessionCheckpoint
+import io.github.kylin33.aifitgym.data.checkpoint.CheckpointEntry
+import io.github.kylin33.aifitgym.data.checkpoint.CheckpointLog
 import io.github.kylin33.aifitgym.data.local.ExerciseEntity
 import io.github.kylin33.aifitgym.data.repo.ExerciseRepository
 import io.github.kylin33.aifitgym.data.repo.PrMetric
@@ -20,6 +23,7 @@ import io.github.kylin33.aifitgym.service.WorkoutTimerBridge
 import io.github.kylin33.aifitgym.service.WorkoutTimerBridge.NO_DEADLINE
 import io.github.kylin33.aifitgym.service.WorkoutTimerBridge.TimerSnapshot
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -173,6 +177,7 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
     private val exercises = container.exerciseRepository
     private val timer = container.workoutTimer
     private val audio = container.audio
+    private val checkpoints = container.checkpoints
 
     private val _state = MutableStateFlow(WorkoutSessionState())
     val state: StateFlow<WorkoutSessionState> = _state.asStateFlow()
@@ -180,6 +185,9 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
     /** 本次训练的总记录 id；组明细都挂在它下面。 */
     private var sessionId = 0L
     private var startedAt = 0L
+
+    /** 开始时刻（墙上时间）。仅供检查点/横幅展示，不参与任何计时。 */
+    private var startedAtWall = 0L
 
     /** 当前阶段的结束时刻（elapsedRealtime）；0 表示当前阶段不计时。 */
     private var phaseDeadline = 0L
@@ -190,6 +198,14 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
     private var timerKey: String? = null
     private var timerAttached = false
 
+    /**
+     * 检查点的写入通道。
+     *
+     * 用 CONFLATED 而不是直接 launch：连点两组时只保留最后一次状态，
+     * 也不会出现「先写的后落盘」把指针写回旧位置。null 表示删除检查点。
+     */
+    private val checkpointWrites = Channel<ActiveSessionCheckpoint?>(Channel.CONFLATED)
+
     init {
         // 通知栏的「+15 秒 / 跳过休息 / 结束训练」回到状态机里执行。
         // 这几个入口自带阶段守卫，多个 ViewModel 同时存活时也只有正在跟练的那个会响应。
@@ -199,6 +215,17 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
                     WorkoutTimerBridge.Command.EXTEND_REST -> extendRest()
                     WorkoutTimerBridge.Command.SKIP_REST -> skipRest()
                     WorkoutTimerBridge.Command.FINISH -> finishEarly()
+                }
+            }
+        }
+
+        // 单消费者按序落盘：写入和清理共用一条队列，顺序天然是对的
+        viewModelScope.launch {
+            for (checkpoint in checkpointWrites) {
+                if (checkpoint == null) {
+                    checkpoints.clear()
+                } else {
+                    checkpoints.save(checkpoint)
                 }
             }
         }
@@ -257,6 +284,82 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * 接着上次没做完的训练继续。
+     *
+     * 恢复的是**位置**，不是倒计时：进程被杀时可能正歇在半分钟里，
+     * 也可能已经关机两小时，把当时的剩余秒数接回来毫无意义
+     * （身体早就恢复完了，接着数只会让人多歇一会儿）。
+     * 所以一律回到「当前这一组的开头」：计次动作直接把目标次数摆出来，
+     * 计时动作重新走 3 秒准备。
+     *
+     * 已经完成的组不重放 —— 它们早就在 workout_set_logs 里，这次的 logs 只是拿来画进度条。
+     */
+    fun resume() {
+        if (startedKey == "resume") return
+        startedKey = "resume"
+        _state.value = WorkoutSessionState(phase = SessionPhase.LOADING)
+
+        viewModelScope.launch {
+            val checkpoint = runCatching { checkpoints.load() }.getOrNull()
+                ?: return@launch fail("没有找到未完成的训练")
+
+            // 训练记录可能被用户在历史里删掉了，那就没有可以继续挂靠的 sessionId
+            if (!runCatching { repository.sessionAlive(checkpoint.sessionId) }.getOrDefault(false)) {
+                checkpoints.clear()
+                return@launch fail("这次训练的记录已经被删掉了，可以从计划页重新开始")
+            }
+
+            val entries = runCatching { repository.restoreEntries(checkpoint.entries) }
+                .getOrNull()
+                .orEmpty()
+            if (entries.isEmpty()) {
+                checkpoints.clear()
+                return@launch fail("这次训练的动作在动作库里找不到了")
+            }
+
+            // 动作被跳过之后下标会错位，全部夹到合法范围内
+            val entryIndex = checkpoint.entryIndex.coerceIn(0, entries.lastIndex)
+            val entry = entries[entryIndex]
+            val setIndex = checkpoint.setIndex.coerceIn(1, entry.targetSets)
+            val useBackup = checkpoint.useBackup && entry.backup != null
+
+            val logs = checkpoint.logs.map {
+                SetLog(
+                    exerciseId = it.exerciseId,
+                    name = it.name,
+                    setIndex = it.setIndex,
+                    reps = it.reps,
+                    seconds = it.seconds,
+                    usedBackup = it.usedBackup,
+                )
+            }
+            val volume = logs.groupingBy { it.exerciseId }.eachCount()
+
+            sessionId = checkpoint.sessionId
+            startedAtWall = checkpoint.startedAtWall
+            // 把「已经练了多久」接上，但把关机的那段时间扣掉：
+            // 用墙上时间算差值的话，第二天打开会显示练了 14 个小时
+            startedAt = SystemClock.elapsedRealtime() - checkpoint.elapsedMs
+
+            _state.value = WorkoutSessionState(
+                phase = SessionPhase.ACTIVE_SET,
+                routineId = checkpoint.routineId,
+                routineName = checkpoint.routineName,
+                entries = entries,
+                entryIndex = entryIndex,
+                setIndex = setIndex,
+                useBackup = useBackup,
+                logs = logs,
+                volume = volume,
+                sessionId = checkpoint.sessionId,
+            )
+            startTicker()
+            enterCurrentSet()
+            syncTimer()
+        }
+    }
+
     /** 建总记录 → 切到第一组。计划 / 考级两条入口共用。 */
     private suspend fun begin(plan: WorkoutPlan, routineId: Long) {
         // 先建总记录：组明细有外键指向它，没有 sessionId 后面一组都存不进去
@@ -271,6 +374,7 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
 
         sessionId = newSessionId
         startedAt = SystemClock.elapsedRealtime()
+        startedAtWall = now
         _state.value = WorkoutSessionState(
             phase = SessionPhase.ACTIVE_SET,
             routineId = routineId,
@@ -304,6 +408,9 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
                 )
             }
         }
+        // 每进入一组就刷新检查点：这里是唯一「位置刚刚变化」的时刻，
+        // 放在这里比散落在 advanceToNextSet / begin / resume 里更不容易漏
+        queueCheckpoint()
     }
 
     private fun beginPhase(phase: SessionPhase, durationMs: Long) {
@@ -457,6 +564,8 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
         ticker?.cancel()
         // 结算页不需要常驻通知了，撤掉服务顺手释放唤醒锁
         detachTimer()
+        // 训练已经收尾，检查点没有意义了：留着会让首页一直挂一条「没做完的训练」
+        checkpointWrites.trySend(null)
 
         if (snapshot.completedSets == 0) {
             // 一组没做就退出：把空壳总记录删掉，别在历史里留一条 0 组的训练
@@ -503,6 +612,58 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
                 )
             }
         }
+    }
+
+    // ---------------------------------------------------------------- 崩溃恢复
+
+    /**
+     * 把当前进度丢进检查点队列。
+     *
+     * 只写指针和已完成组，不写倒计时剩余：恢复时本来就要重新开始当前这一组。
+     * 写失败（没有存储空间）不提示 —— 这个功能是「万一」，不该反过来打扰正常训练。
+     */
+    private fun queueCheckpoint() {
+        val snapshot = _state.value
+        if (snapshot.current == null || sessionId <= 0L) return
+
+        checkpointWrites.trySend(
+            ActiveSessionCheckpoint(
+                sessionId = sessionId,
+                routineId = snapshot.routineId,
+                routineName = snapshot.routineName,
+                startedAtWall = startedAtWall,
+                elapsedMs = if (startedAt > 0L) {
+                    SystemClock.elapsedRealtime() - startedAt
+                } else {
+                    snapshot.elapsedMs
+                },
+                entryIndex = snapshot.entryIndex,
+                setIndex = snapshot.setIndex,
+                useBackup = snapshot.useBackup,
+                reps = snapshot.reps,
+                entries = snapshot.entries.map {
+                    CheckpointEntry(
+                        exerciseId = it.exercise.id,
+                        backupExerciseId = it.backup?.id,
+                        sets = it.targetSets,
+                        reps = it.item.targetReps,
+                        seconds = it.item.targetDurationSec,
+                        restSeconds = it.restSeconds,
+                    )
+                },
+                logs = snapshot.logs.map {
+                    CheckpointLog(
+                        exerciseId = it.exerciseId,
+                        name = it.name,
+                        setIndex = it.setIndex,
+                        reps = it.reps,
+                        seconds = it.seconds,
+                        usedBackup = it.usedBackup,
+                    )
+                },
+                savedAtWall = System.currentTimeMillis(),
+            )
+        )
     }
 
     // ---------------------------------------------------------------- 用户操作

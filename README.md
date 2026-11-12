@@ -235,10 +235,28 @@ IDLE ──start──> PREPARE(3s) ──> ACTIVE_SET ──> RESTING ──┐
   归零自动标记完成并进休息 → 休息归零自动进下一组，全程不用碰屏幕。
 - 计时不靠 `delay(1000)` 累加，而是每阶段记一个 `SystemClock.elapsedRealtime()` 截止点，
   由 80ms 的 ticker 对比。界面卡顿或主线程繁忙都不会让倒计时走慢。
-- **一组一落库**：每完成一组立刻写一条 `workout_logs`（同一次训练共用 `batchId`），
+- **一组一落库**：每完成一组立刻往 `workout_set_logs` 写一行（同一次训练共用 `sessionId`），
   中途退出或进程被杀，做过的组不会丢。
 - 切平替动作后，本动作剩下的组都按平替走，打卡记的也是平替动作的 id ——
   这样结算热力图反映的是「实际练了什么」而不是「计划想练什么」。
+
+### 崩溃恢复（检查点）
+
+「每一组都落库」只解决了成绩不丢，没解决**位置**不丢 ——「练到第 3 个动作的第 2 组」
+只活在 ViewModel 内存里，进程一死就回到首页，只能对着一条没头没尾的历史记录干瞪眼。
+
+所以每进入一组就往 `app_meta` 写一份 JSON 检查点（`data/checkpoint/`）：
+
+- 写什么：`sessionId`、练到哪个动作第几组、有没有切平替、已练时长、已完成组的副本；
+  **不写**倒计时剩余 —— 恢复时一律从当前这组的开头重来（关机两小时后接着数 40 秒没有意义）。
+- 什么时候写：`enterCurrentSet()` 里，也就是位置唯一会变的时刻；收尾时写一次 `null` 删除。
+  写入走一个 `Channel(CONFLATED)` 单消费者队列，连点两组不会出现「后写的先落盘」。
+- 怎么读：首页用 Flow 监听这个键，所以训练结束后横幅会自己消失，不需要重启 App。
+- 存哪：`app_meta`（键值表）而不是新建表 —— 为一张只有一行、随时被覆盖的表写 Room 迁移不值当。
+- 丢弃时只删检查点，不动数据库：已完成组仍在历史里，怎么补完由用户决定。
+
+首页横幅读的是 `ActiveSessionCheckpoint`，点「继续训练」走独立路由 `resume_workout`
+（不能复用 `workout/{routineId}`，否则 `LongType` 参数解析会炸）。
 
 ## 关于上游仓库
 
@@ -264,11 +282,17 @@ io.github.kylin33.aifitgym
 │   │   ├── CatalogueSeeder.kt      动作库导入流程与 ImportState
 │   │   ├── RoutinePresets.kt       三套内置计划模板（真实动作 ID）
 │   │   └── PresetRoutineSeeder.kt  模板幂等灌入（校验动作存在 + 版本标记）
+│   ├── checkpoint/
+│   │   └── ActiveSessionCheckpoint.kt  未完成训练的检查点（app_meta 存 JSON）
+│   ├── ai/                         AI 教练：端点配置、Keystore 加密、SSE 流式解析、计划协议
+│   ├── backup/                     全量备份 JSON 的读写与覆盖恢复
 │   └── repo/
 │       ├── ExerciseRepository.kt   动作查询封装
 │       ├── RoutineRepository.kt    计划读取与保存
-│       └── WorkoutRepository.kt    计划展开成跟练序列 + 单组打卡落库
-├── audio/BeepPlayer.kt             ToneGenerator 现场合成提示音（不占 assets）
+│       ├── WorkoutRepository.kt    计划展开成跟练序列 + 单组打卡落库 + 检查点重建
+│       └── DataResetRepository.kt  清空所有用户数据并补回初始态
+├── audio/                          SoundPool 提示音 + 音频焦点闪避 + 震动
+├── service/                        跟练倒计时的前台服务（锁屏也能倒数）
 └── ui/
     ├── FitGymRoot.kt               ImportState 门控 + NavHost
     ├── LibraryViewModel.kt         动作库列表状态 + 搜索
@@ -287,6 +311,9 @@ io.github.kylin33.aifitgym
     │   ├── ExerciseRow.kt          列表行（动作库与选择器共用）
     │   └── ExercisePreviewSheet.kt ModalBottomSheet：演示图 + 肌肉热力图 + 图例
     ├── detail/DetailScreen.kt      大图 + 目标肌群 + 步骤
+    ├── ai/                         AI 教练对话页 + 设置页（含明文 HTTP 警告）
+    ├── backup/                     备份导出 / 导入确认
+    ├── profile/                    「我的」：统计卡 + 各入口
     ├── legal/
     │   ├── LegalContent.kt         隐私政策与免责声明正文（App 与仓库文档的唯一来源）
     │   └── LegalScreen.kt          长文阅读页（无卡片、纯排版）
@@ -313,11 +340,66 @@ io.github.kylin33.aifitgym
 ## 构建
 
 ```bash
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug          # 调试包，包名带 .debug 后缀
+./gradlew :app:assembleRelease        # 混淆 + 签名，用于分发
 ```
 
 编译环境沿用 `D:\work\AndroidDev` 约定：AGP 9.5.0 / Kotlin 2.4.21 / Compose BOM 2026.09.00 /
 Room 2.8.5（KSP 2.3.13）/ compileSdk 37.2 / minSdk 24。
+
+### 签名
+
+release 包用仓库根目录的 `keystore.properties` 签名（已 gitignore，模板见
+`keystore.properties.example`）：
+
+```properties
+storeFile=keystore/fitgym-release.jks
+storePassword=…
+keyAlias=fitgym
+keyPassword=…
+```
+
+- **密钥库要备份**：丢了就再也不能给已发布的 App 发更新，只能换包名重新上架。
+- 没有这个文件也能编译（产出未签名 APK），方便别人 clone 下来验证代码。
+- debug 包用 `.debug` 后缀，和 release 包可以共存 —— 两者签名必然不同，
+  不加后缀就只能装一个卸一个。
+
+### R8
+
+`release` 开了 `isMinifyEnabled` + `isShrinkResources`，26 MB → **14 MB**。
+规则见 `app/proguard-rules.pro`，重点是三处：
+
+| 谁 | 为什么容易被裁掉 |
+| --- | --- |
+| Room 的 `*_Impl` / `@Entity` / `@Dao` | 靠类名和反射实例化 |
+| kotlinx.serialization 的 `$$serializer` | 编译器生成，`Companion` 里的 `serializer()` 是反射入口 |
+| 枚举常量名 | `RoutineCategory` / `SkillBranch` 的 `name` 会写进数据库和备份 JSON |
+
+混淆后的崩溃堆栈靠 `app/build/outputs/mapping/release/mapping.txt` 反解：
+
+```bash
+retrace mapping.txt crash.txt      # Android SDK/cmdline-tools 里带这个脚本
+```
+
+### 发版
+
+打 `v` 开头的 tag 就会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：
+跑单测 → 构建签名 APK → 上传到 GitHub Release（附 sha256 与 mapping）。
+
+```bash
+git tag -a v1.0.0 -m "1.0.0"
+git push origin v1.0.0
+```
+
+需要先在仓库 Settings → Secrets 配好四项：`KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、
+`KEY_ALIAS`、`KEY_PASSWORD`（`base64 -w 0 keystore/fitgym-release.jks` 得到第一项）。
+
+不想等 CI 也可以本地出包：
+
+```bash
+tools/release.sh              # 只出包，落在 build/release/
+tools/release.sh v1.0.0       # 出包 + gh release create
+```
 
 
 
@@ -369,7 +451,8 @@ AES-GCM 密钥加密，备份文件里不含它。
      这是组间倒计时，并给出演示视频。
   3. Data safety 表单：按 PRIVACY.md 填「不收集、不共享」；AI 请求是用户主动发起、
      发往用户自选服务商，属于「用户自己的服务商」而非开发者收集。
-  4. release 签名 + `isMinifyEnabled = true`（现在 debug 能跑，release 还没配签名）。
+  4. 每发一版记得手动加 `versionCode` + `versionName`（现在是 1 / 1.0，
+     Play 上同一 versionCode 传两次会被拒）。
 
 ### 如果以后想改成闭源
 

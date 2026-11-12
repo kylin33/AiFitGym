@@ -1,5 +1,6 @@
 package io.github.kylin33.aifitgym.data.repo
 
+import io.github.kylin33.aifitgym.data.checkpoint.CheckpointEntry
 import io.github.kylin33.aifitgym.data.local.ExerciseDao
 import io.github.kylin33.aifitgym.data.local.ExerciseEntity
 import io.github.kylin33.aifitgym.data.local.RoutineDao
@@ -115,6 +116,50 @@ class WorkoutRepository(
 
         return WorkoutPlan(routine, entries, skipped = items.size - entries.size)
     }
+
+    /**
+     * 从崩溃恢复检查点重建可执行序列。
+     *
+     * 不复用 [loadPlan]：检查点存的是开始训练那一刻的展开结果，如果这期间用户改过计划，
+     * 用「现在这套」恢复会让指针错位（entryIndex 指向了别的动作）。
+     * 唯一和 loadPlan 一致的行为是「动作库里没有了就跳过」——同样不能让跟练页出现空组。
+     */
+    suspend fun restoreEntries(items: List<CheckpointEntry>): List<WorkoutEntry> {
+        if (items.isEmpty()) return emptyList()
+
+        val ids = buildList {
+            items.forEach { item ->
+                add(item.exerciseId)
+                item.backupExerciseId?.let(::add)
+            }
+        }.distinct()
+
+        val byId = exerciseDao.findByIds(ids).associateBy { it.id }
+
+        return items.mapIndexedNotNull { index, item ->
+            val exercise = byId[item.exerciseId] ?: return@mapIndexedNotNull null
+            WorkoutEntry(
+                // id 只是占位：恢复出来的条目不会写回 routine_exercises
+                item = RoutineExerciseEntity(
+                    id = 0,
+                    routineId = 0L,
+                    exerciseId = item.exerciseId,
+                    orderIndex = index,
+                    targetSets = item.sets,
+                    targetReps = item.reps,
+                    targetDurationSec = item.seconds,
+                    restDurationSec = item.restSeconds,
+                    backupExerciseId = item.backupExerciseId,
+                ),
+                exercise = exercise,
+                backup = item.backupExerciseId?.let { byId[it] },
+            )
+        }
+    }
+
+    /** 检查点指向的那次训练还在不在（用户可能已经把它从历史里删了）。 */
+    suspend fun sessionAlive(sessionId: Long): Boolean =
+        sessionDao.findSession(sessionId) != null
 
     /**
      * 训练开始：先落一条总记录拿到 sessionId。

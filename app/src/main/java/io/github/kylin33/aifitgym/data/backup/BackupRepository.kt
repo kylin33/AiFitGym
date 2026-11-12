@@ -1,6 +1,8 @@
 package io.github.kylin33.aifitgym.data.backup
 
 import androidx.room.withTransaction
+import io.github.kylin33.aifitgym.data.checkpoint.CheckpointStore
+import io.github.kylin33.aifitgym.data.local.AppMetaDao
 import io.github.kylin33.aifitgym.data.local.BranchProgressDao
 import io.github.kylin33.aifitgym.data.local.ExerciseDao
 import io.github.kylin33.aifitgym.data.local.FitGymDatabase
@@ -31,6 +33,7 @@ class BackupRepository(
     private val routineDao: RoutineDao,
     private val sessionDao: WorkoutSessionDao,
     private val progressDao: BranchProgressDao,
+    private val appMetaDao: AppMetaDao,
 ) {
 
     /**
@@ -124,6 +127,9 @@ class BackupRepository(
                 db.withTransaction {
                     restoreSkillTree(payload)
                     val restored = restoreRoutinesAndLogs(payload)
+                    // 覆盖恢复之后，旧检查点指向的 sessionId 可能已经属于另一段历史，
+                    // 接着练会把组明细写到别人的记录上 —— 直接作废
+                    appMetaDao.remove(CheckpointStore.KEY)
                     restored
                 }
             }

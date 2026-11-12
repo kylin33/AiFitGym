@@ -1,0 +1,106 @@
+name: Release APK
+
+# 打一个 v 开头的 tag 就出包，例如：
+#   git tag -a v1.0.0 -m "1.0.0" && git push origin v1.0.0
+#
+# 需要先在仓库的 Settings → Secrets and variables → Actions 里配四个 secret：
+#   KEYSTORE_BASE64      keystore/fitgym-release.jks 的 base64 字符串
+#   KEYSTORE_PASSWORD    storePassword
+#   KEY_ALIAS            keyAlias
+#   KEY_PASSWORD         keyPassword
+#
+# 生成 KEYSTORE_BASE64（注意别换行，Windows 上用 -w 0）：
+#   base64 -w 0 keystore/fitgym-release.jks
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # 没有签名材料就直说，别产出一个装不上的未签名 APK 让人以为成功了
+      - name: Check signing secrets
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::缺少 KEYSTORE_BASE64，无法签名 release 包。请在 Settings → Secrets 里补齐四个签名 secret。"
+            exit 1
+          fi
+
+      - name: Decode keystore
+        run: |
+          mkdir -p keystore
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > keystore/fitgym-release.jks
+          cat > keystore.properties <<EOF
+          storeFile=keystore/fitgym-release.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+          echo "keystore 已就绪（$(stat -c%s keystore/fitgym-release.jks) 字节）"
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --console=plain
+
+      # 混淆之后必须有 mapping.txt，否则崩溃堆栈是一堆 a.a.a
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp app/build/outputs/apk/release/app-release.apk "out/FitGym-${VERSION}.apk"
+          cp app/build/outputs/mapping/release/mapping.txt "out/mapping-${VERSION}.txt"
+          echo "APK 体积：$(du -h "out/FitGym-${VERSION}.apk" | cut -f1)"
+          sha256sum "out/FitGym-${VERSION}.apk" | tee "out/FitGym-${VERSION}.apk.sha256"
+
+      - name: Publish GitHub Release
+        # 手动触发时没有 tag，只产出 artifacts，不发版
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: FitGym ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            out/FitGym-*.apk
+            out/FitGym-*.apk.sha256
+            out/mapping-*.txt
+          body: |
+            安装包：`FitGym-*.apk`（已签名，可直接覆盖安装升级）
+
+            校验下载是否完整：
+            ```
+            sha256sum -c FitGym-*.apk.sha256
+            ```
+
+            `mapping-*.txt` 是 R8 的混淆映射表，只在把崩溃堆栈还原成源码行号时用得上，普通用户不需要下载。
+
+      - name: Upload artifacts for manual runs
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fitgym-apk
+          path: out/*

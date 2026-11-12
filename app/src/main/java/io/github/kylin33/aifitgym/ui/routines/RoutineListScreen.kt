@@ -27,9 +27,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarDuration
@@ -52,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.kylin33.aifitgym.data.checkpoint.ActiveSessionCheckpoint
 import io.github.kylin33.aifitgym.data.local.RoutineCategory
 import io.github.kylin33.aifitgym.data.local.RoutineSummary
 import io.github.kylin33.aifitgym.ui.components.ExerciseImage
@@ -77,6 +80,9 @@ fun RoutineListScreen(
     onDeleteRoutine: (Long) -> Unit,
     onUndoDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    checkpoint: ActiveSessionCheckpoint? = null,
+    onResumeSession: () -> Unit = {},
+    onDiscardCheckpoint: () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -156,6 +162,16 @@ fun RoutineListScreen(
                 Spacer(Modifier.height(10.dp))
             }
 
+            item(key = "resume_banner") {
+                if (checkpoint != null) {
+                    ResumeBanner(
+                        checkpoint = checkpoint,
+                        onResume = onResumeSession,
+                        onDiscard = onDiscardCheckpoint,
+                    )
+                }
+            }
+
             item(key = "coach") {
                 CoachEntryCard(onClick = onOpenCoach)
                 Spacer(Modifier.height(2.dp))
@@ -215,6 +231,120 @@ fun RoutineListScreen(
                 confirmTarget = null
             },
             onDismiss = { confirmTarget = null },
+        )
+    }
+}
+
+/**
+ * 「上次没做完」横幅。
+ *
+ * 只在真的存在检查点时出现，而且必须**显眼**：用户开 App 的目的十有八九是接着练，
+ * 让他去翻历史找那条没头没尾的记录，等于把恢复功能藏起来。
+ *
+ * 文案刻意写清「已完成 3/12 组」：这样「继续」是可预期的（从第 4 组接上），
+ * 而不是让人担心点进去会从头再来一遍。
+ */
+@Composable
+private fun ResumeBanner(
+    checkpoint: ActiveSessionCheckpoint,
+    onResume: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    var confirmDiscard by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "有一场训练没做完",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = checkpoint.routineName.ifBlank { "考级训练" },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    text = "${checkpoint.positionLabel} · 已完成 ${checkpoint.completedSets}/${checkpoint.totalSets} 组",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        LinearProgressIndicator(
+            progress = { checkpoint.progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f),
+        )
+
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = onResume,
+                modifier = Modifier.weight(1f),
+            ) { Text("继续训练") }
+            Spacer(Modifier.width(4.dp))
+            TextButton(onClick = { confirmDiscard = true }) {
+                Text("放弃", color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+    }
+
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("放弃这次训练？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "只会去掉这条「继续训练」的提示。" +
+                            "已经做完的 ${checkpoint.completedSets} 组还在训练历史里，" +
+                            "想补完或删掉都可以在那边操作。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDiscard = false
+                        onDiscard()
+                    },
+                ) { Text("放弃", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscard = false }) { Text("取消") }
+            },
         )
     }
 }
