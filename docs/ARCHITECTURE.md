@@ -81,12 +81,43 @@ README 只保留上手需要的信息，这里是实现层面的记录：为什�
 | 内容 | 说明 |
 | --- | --- |
 | `exercises.json` | 2303 个动作，含中英文名、部位、目标肌群、副肌群、器械、步骤（1.7 MB） |
-| `gifs/<id>.webp` | 与动作一一对应的演示图，2303 张（10.6 MB） |
+| `gifs/<id>.webp` | 与动作一一对应的**单帧**示意图，2303 张（10.6 MB） |
+| `clips/<id>.mp4` | 常用动作的动态演示，51 个（1.6 MB），见下文 |
 | `taxonomy.json` | 部位 / 分类枚举及计数，调试参考用 |
 | `anatomy/` | 人体热力图资源（见下节） |
 
 筛选口径：`equipment == "body weight"`（徒手）**或** `category == "cardio"`（有氧）。
 数据源实际用词是 `"body weight"`（带空格），分类里徒手动作多为 `calisthenics`。
+
+### 动态演示（短片）
+
+上游的 `.webp` 只有一帧，动作过程全在 `media/clip/<id>.mp4` 里：
+**180×180、约 9 秒、H.264、faststart（moov 在文件头）**，中位 23 KB、最大 79 KB。
+分辨率与静态图一致，所以换成短片不会更糊，只是会动。
+
+全量 2303 个约 63 MB，对 APK 太重，因此只内置**常用动作**：48 个技能树主干
+（`exercises.json` 里带 `skillLevel` 的）加三套内置模板用到的动作，去重后 51 个、1.6 MB。
+其余动作显示静态图，两者尺寸相同，界面不会跳。
+
+```bash
+python tools/fetch_clips.py            # 默认集合（51 个）
+python tools/fetch_clips.py --all      # 全量（约 63 MB）
+python tools/fetch_clips.py --ids 2308 --force
+```
+
+脚本从 raw.githubusercontent 并发拉取，幂等（已存在且是合法 mp4 就跳过），
+先写 `.part` 再改名，中断不会留下半截文件被当成已下载。
+
+播放用 Media3 ExoPlayer，URI 直接是 `asset:///clips/<id>.mp4`（`AssetDataSource` 原生支持），
+不用先拷到磁盘。两个必须的配置：
+
+- `androidResources { noCompress += "mp4" }`：被压缩的 asset 拿不到文件描述符，
+  `openFd()` 会失败，还会多占一份内存。
+- `ExerciseClip` 在 `DisposableEffect` 里 `release()`：不释放的话解码器一直被占着，
+  在动作之间来回切会 OOM；同时按 `ON_STOP / ON_START` 暂停与续播。
+
+没有短片的动作自动回退到 `ExerciseImage`，判断依据是 `assets.list("clips")` 的结果
+（进程内缓存一份），比逐个 `open()` 撞异常便宜得多。
 
 ### 重新生成
 
@@ -101,9 +132,8 @@ python tools/build_catalogue.py --catalogue <openGym 仓库>/catalogue
 
 ### 上游仓库
 
-`catalogue/` 实际有 6554 个动作文件（其中 922 个占位），媒体是 `media/still/<id>.webp`（静态图）
-与 `media/clip/<id>.mp4`（动作短片），**没有 GIF**。本项目只打包 WebP；若要播放短片，
-可引入 Media3 按需读 mp4。
+`catalogue/` 实际有 6554 个动作文件（其中 922 个占位），媒体是 `media/still/<id>.webp`
+（**单帧**静态图）与 `media/clip/<id>.mp4`（动作短片），**没有 GIF**。
 
 ---
 

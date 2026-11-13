@@ -13,6 +13,7 @@
 ## 功能
 
 - **动作库** — 2303 个动作，中英文名 + 演示图 + 目标肌群，支持模糊搜索与部位/器械筛选
+  常用动作（技能树主干与内置模板）带**动态演示**，其余为单帧示意图
 - **肌肉热力图** — 动作、整份计划、完成后的恢复状态都用同一套人体图着色
 - **训练计划** — 三套内置模板，也可自建：组数 / 次数或秒数 / 组间休息 / 拖动排序 / 平替动作
 - **跟练** — 计次与计时双模；3 秒准备提示音、自动进组、组间休息、屏幕常亮、
@@ -52,7 +53,7 @@ app/src/main/java/io/github/kylin33/aifitgym/
 ├── audio/         提示音（SoundPool + 音频焦点闪避）
 └── ui/            Compose 界面：动作库、计划编排、跟练、历史、我的、AI 教练
 
-app/src/main/assets/    动作 JSON（1.7 MB）+ 演示图（10.6 MB）+ 人体图几何
+app/src/main/assets/    动作 JSON（1.7 MB）+ 演示图（10.6 MB）+ 动态短片（1.6 MB）+ 人体图几何
 tools/                  动作包与人体图的生成脚本（需要上游仓库）
 docs/ARCHITECTURE.md    设计取舍与实现细节
 ```
@@ -66,6 +67,7 @@ docs/ARCHITECTURE.md    设计取舍与实现细节
 | 数据库 | Room + KSP |
 | JSON | kotlinx.serialization |
 | 图片 | Coil 3（直接读 `file:///android_asset/`） |
+| 视频 | Media3 ExoPlayer（读 `asset:///`，静音循环） |
 | 依赖注入 | 手写 `AppContainer`，不上 Hilt |
 
 ## 素材来源与许可
@@ -74,8 +76,8 @@ docs/ARCHITECTURE.md    设计取舍与实现细节
 
 但**内置素材的授权条件不同**，务必先读 [NOTICE](NOTICE)：
 
-- 动作数据与演示图来自 [openGym](https://github.com/DuarteSantos8/openGym)（同为 AGPL-3.0），
-  其中 2303 张演示图的版权属于 **Gym visual**，上游仅获授权用于 openGym 本身。
+- 动作数据、演示图与演示短片来自 [openGym](https://github.com/DuarteSantos8/openGym)
+  （同为 AGPL-3.0），其中图片与短片的版权属于 **Gym visual**，上游仅获授权用于 openGym 本身。
   非商业 fork 可原样保留并附声明；**商用或上架应用商店需要自行取得授权**，或替换成自有/CC0 素材。
 - 人体图几何数据为 **MuscleMap by Melih Colpan**（MIT）。
 

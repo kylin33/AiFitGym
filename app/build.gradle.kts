@@ -88,6 +88,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    androidResources {
+        // 演示短片必须保持未压缩：ExoPlayer 走 AssetDataSource 时要 openFd()，
+        // 被压缩的 asset 拿不到文件描述符，只能退化成流式读，还多占一份内存
+        noCompress += listOf("mp4")
+    }
 }
 
 // Room 生成的 schema 落到 app/schemas，方便以后写迁移
@@ -119,6 +125,10 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.serialization.json)
+
+    // 动作演示短片。ExoPlayer 直接认 asset:///clips/x.mp4，不用先落磁盘
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
 
     testImplementation(libs.junit)
 }

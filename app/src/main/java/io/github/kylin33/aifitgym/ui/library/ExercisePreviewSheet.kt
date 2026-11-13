@@ -36,7 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.kylin33.aifitgym.data.anatomy.MuscleScoring
 import io.github.kylin33.aifitgym.data.local.ExerciseEntity
-import io.github.kylin33.aifitgym.ui.components.ExerciseImage
+import io.github.kylin33.aifitgym.ui.components.ExerciseClip
 import io.github.kylin33.aifitgym.ui.components.MuscleHeatmap
 import io.github.kylin33.aifitgym.ui.components.muscleBaseColor
 import io.github.kylin33.aifitgym.ui.components.muscleColorForScore
@@ -78,8 +78,9 @@ fun ExercisePreviewSheet(
                 .navigationBarsPadding(),
         ) {
             Row(verticalAlignment = Alignment.Top) {
-                ExerciseImage(
-                    path = exercise.image,
+                ExerciseClip(
+                    exerciseId = exercise.id,
+                    imagePath = exercise.image,
                     contentDescription = exercise.name,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier

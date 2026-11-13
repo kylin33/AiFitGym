@@ -32,7 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.kylin33.aifitgym.data.local.ExerciseEntity
-import io.github.kylin33.aifitgym.ui.components.ExerciseImage
+import io.github.kylin33.aifitgym.ui.components.ExerciseClip
 
 @Composable
 fun DetailScreen(
@@ -57,8 +57,9 @@ fun DetailScreen(
                 .navigationBarsPadding(),
         ) {
             Box {
-                ExerciseImage(
-                    path = exercise.image,
+                ExerciseClip(
+                    exerciseId = exercise.id,
+                    imagePath = exercise.image,
                     contentDescription = exercise.name,
                     modifier = Modifier
                         .fillMaxWidth()

@@ -19,8 +19,9 @@ Copyright (C) 2026 FitGym contributors
              本项目的设计，文字内容来自上游。
 
 
-2. 动作演示图
-   文件：app/src/main/assets/gifs/*.webp（共 2303 张）
+2. 动作演示图与演示短片
+   文件：app/src/main/assets/gifs/*.webp（2303 张单帧静态图）
+         app/src/main/assets/clips/*.mp4（51 个动作短片，常用动作）
    版权：© Aliaksandr Makatserchyk, Gym visual —— https://gymvisual.com/
    上游授权范围（引自 openGym README 的 Important 段）：
      「The exercise media is not covered by that license. The stills and
@@ -29,8 +30,10 @@ Copyright (C) 2026 FitGym contributors
       only inside the app packages. A non-commercial fork may keep them
       unmodified with the notice; anything else needs your own licence from
       gymvisual.com.」
-   即：这些图仅授权给 openGym 使用；非商业性质的 fork 可以原样保留并附本声明，
+   即：这些图片与短片仅授权给 openGym 使用；非商业性质的 fork 可以原样保留并附本声明，
        其余用途需要自行向 gymvisual.com 取得授权。
+   本项目保留了上游的 180 px 尺寸（静态图与短片都是 180×180，未放大），
+   与上面「180 px in this repository」的说法一致。
    ★ 这一项不受本项目 AGPL 授权影响，也无法由本项目转授。再分发、商用或以本 App
      上架应用商店前，必须单独解决。
 
