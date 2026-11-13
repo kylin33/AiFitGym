@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.kylin33.aifitgym.data.local.ExerciseEntity
+import io.github.kylin33.aifitgym.ui.components.ClipDownloadAction
 import io.github.kylin33.aifitgym.ui.components.ExerciseClip
 
 @Composable
@@ -98,6 +99,12 @@ fun DetailScreen(
                     Tag(exercise.categoryCn)
                     Tag(exercise.equipmentCn)
                 }
+
+                // 冷门动作的短片不随 APK 发行，这里补一个下载入口（有片时组件自身不渲染）
+                ClipDownloadAction(
+                    exerciseId = exercise.id,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
 
                 Spacer(Modifier.height(20.dp))
 

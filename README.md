@@ -48,12 +48,12 @@ debug 与 release 可以同时装在一台机器上（包名后缀不同），�
 
 ```
 app/src/main/java/io/github/kylin33/aifitgym/
-├── data/          Room 实体与 DAO、动作导入、肌群映射、检查点、备份、AI 协议
+├── data/          Room 实体与 DAO、动作导入、肌群映射、检查点、备份、短片存储、AI 协议
 ├── service/       跟练倒计时的前台服务
 ├── audio/         提示音（SoundPool + 音频焦点闪避）
 └── ui/            Compose 界面：动作库、计划编排、跟练、历史、我的、AI 教练
 
-app/src/main/assets/    动作 JSON（1.7 MB）+ 演示图（10.6 MB）+ 动态短片（1.6 MB）+ 人体图几何
+app/src/main/assets/    动作 JSON（1.7 MB）+ 演示图（10.6 MB）+ 动态短片（24 MB）+ 人体图几何
 tools/                  动作包与人体图的生成脚本（需要上游仓库）
 docs/ARCHITECTURE.md    设计取舍与实现细节
 ```
@@ -67,7 +67,7 @@ docs/ARCHITECTURE.md    设计取舍与实现细节
 | 数据库 | Room + KSP |
 | JSON | kotlinx.serialization |
 | 图片 | Coil 3（直接读 `file:///android_asset/`） |
-| 视频 | Media3 ExoPlayer（读 `asset:///`，静音循环） |
+| 视频 | Media3 ExoPlayer（`asset:///` 与 `file://` 都吃，静音循环） |
 | 依赖注入 | 手写 `AppContainer`，不上 Hilt |
 
 ## 素材来源与许可
@@ -78,6 +78,7 @@ docs/ARCHITECTURE.md    设计取舍与实现细节
 
 - 动作数据、演示图与演示短片来自 [openGym](https://github.com/DuarteSantos8/openGym)
   （同为 AGPL-3.0），其中图片与短片的版权属于 **Gym visual**，上游仅获授权用于 openGym 本身。
+  短片内置了训练类里常用的 989 个，其余在同仓库按需下载，两类是同一批素材、同样未放大。
   非商业 fork 可原样保留并附声明；**商用或上架应用商店需要自行取得授权**，或替换成自有/CC0 素材。
 - 人体图几何数据为 **MuscleMap by Melih Colpan**（MIT）。
 

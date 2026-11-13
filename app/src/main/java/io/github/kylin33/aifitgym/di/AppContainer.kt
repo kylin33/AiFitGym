@@ -9,6 +9,7 @@ import io.github.kylin33.aifitgym.data.ai.CoachContextBuilder
 import io.github.kylin33.aifitgym.data.ai.CoachRepository
 import io.github.kylin33.aifitgym.data.backup.BackupRepository
 import io.github.kylin33.aifitgym.data.checkpoint.CheckpointStore
+import io.github.kylin33.aifitgym.data.clip.ClipStore
 import io.github.kylin33.aifitgym.data.local.FitGymDatabase
 import io.github.kylin33.aifitgym.data.recovery.RecoveryRepository
 import io.github.kylin33.aifitgym.data.repo.DataResetRepository
@@ -135,6 +136,16 @@ class AppContainer(context: Context) {
      */
     val workoutTimer: WorkoutTimerController by lazy {
         WorkoutTimerController(appContext)
+    }
+
+    /**
+     * 动作演示短片：内置的那批在 assets 里，冷门动作按需下载到私有目录。
+     *
+     * 单例是必须的 —— 下载任务、进度、可用集合都要跨页面活下来：
+     * 用户在抽屉里点了下载就退出去，回来时进度不能重来一遍。
+     */
+    val clipStore: ClipStore by lazy {
+        ClipStore(appContext)
     }
 
     /**

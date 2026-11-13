@@ -5,9 +5,10 @@
 上游 `catalogue/media/still/<id>.webp` 是**单帧静态图**，真正的动作过程在
 `catalogue/media/clip/<id>.mp4`（180×180、约 9 秒、H.264、中位 23 KB）。
 
-默认只下「常用动作」——48 个技能树主干（exercises.json 里带 skillLevel 的）
-加三套内置模板用到的动作，去重后约 51 个、1.5 MB。全量 2303 个约 63 MB，
-用 --all 才会那样下。
+默认下「主打动作」——徒手体操 865 + 力量 104，加上 48 个技能树主干
+（exercises.json 里带 skillLevel 的）和三套内置模板用到的动作，去重后 989 个、
+约 24 MB。其余 1314 个（拉伸/柔韧/瑜伽/有氧/爆发力…）不进 APK，
+App 内按需下载。全量 2303 个约 56 MB，用 --all 才会那样下。
 
 用法（在工程根目录）：
 
@@ -51,15 +52,21 @@ def load_catalog() -> list[dict]:
         return json.load(f)["items"]
 
 
+# 预装进 APK 的分类。其余分类（stretching / mobility / yoga / cardio /
+# plyometrics / isometric / combat / pilates / rehab）留给 App 内按需下载，
+# 否则光是拉伸和瑜伽就多出 770 个短片、20 MB
+BUNDLED_CATEGORIES = {"calisthenics", "strength"}
+
+
 def default_ids(items: list[dict]) -> list[str]:
-    """48 个技能树主干 + 内置计划模板用到的动作。"""
-    trunk = [e["id"] for e in items if e.get("skillLevel")]
-    preset_ids: set[str] = set()
+    """徒手体操 + 力量，再加技能树主干和内置计划模板用到的动作。"""
+    ids = {e["id"] for e in items if e.get("category") in BUNDLED_CATEGORIES}
+    ids |= {e["id"] for e in items if e.get("skillLevel")}
     if os.path.exists(PRESETS):
         # 模板文件里的动作 id 就是 4~5 位数字字符串，直接抠出来即可，不做 Kotlin 解析
         with open(PRESETS, encoding="utf-8") as f:
-            preset_ids = set(re.findall(r'"(\d{4,5})"', f.read()))
-    return sorted(set(trunk) | preset_ids)
+            ids |= set(re.findall(r'"(\d{4,5})"', f.read()))
+    return sorted(ids)
 
 
 def looks_like_mp4(path: str) -> bool:
@@ -107,7 +114,7 @@ def fetch(one: tuple[str, str, bool]) -> tuple[str, str, int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="下载上游动作演示短片")
-    ap.add_argument("--all", action="store_true", help="下载全部动作（约 63 MB）")
+    ap.add_argument("--all", action="store_true", help="下载全部动作（约 56 MB）")
     ap.add_argument("--ids", help="指定 id，逗号分隔")
     ap.add_argument("--out", default=OUT_DIR, help="输出目录")
     ap.add_argument("--jobs", type=int, default=3, help="并发数（代理不稳时降到 1~2）")

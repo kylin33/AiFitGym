@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
@@ -57,6 +58,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.kylin33.aifitgym.ui.components.rememberClipStore
 import io.github.kylin33.aifitgym.ui.history.durationLabel
 
 /**
@@ -85,7 +88,11 @@ fun ProfileScreen(
 ) {
     var showAbout by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showClipClear by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    // 按需下载的演示短片存在私有目录，用户既看不到也删不掉，给一个能看占用、能清空的入口
+    val clipStore = rememberClipStore()
+    val localClips by clipStore.local.collectAsStateWithLifecycle()
 
     LaunchedEffect(message) {
         val text = message ?: return@LaunchedEffect
@@ -235,6 +242,21 @@ fun ProfileScreen(
                         subtitle = "训练风险、AI 内容的局限与责任范围",
                         onClick = onOpenDisclaimer,
                     )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 60.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                    )
+                    EntryRow(
+                        icon = Icons.Filled.PlayArrow,
+                        title = "演示短片",
+                        subtitle = if (localClips.isEmpty()) {
+                            "缺演示的动作可以单独下载 · 当前没有额外占用"
+                        } else {
+                            "已下载 ${localClips.size} 个 · ${clipSizeLabel(localClips.values.sum())}，点一下可清理"
+                        },
+                        onClick = { showClipClear = true },
+                        enabled = localClips.isNotEmpty(),
+                    )
                 }
             }
 
@@ -275,6 +297,32 @@ fun ProfileScreen(
                 onClearAllData()
             },
             onDismiss = { showClearConfirm = false },
+        )
+    }
+
+    if (showClipClear) {
+        AlertDialog(
+            onDismissRequest = { showClipClear = false },
+            title = { Text("清理已下载的短片？") },
+            text = {
+                Text(
+                    text = "会删除 ${localClips.size} 个按需下载的演示短片，" +
+                        "释放 ${clipSizeLabel(localClips.values.sum())}。" +
+                        "内置短片不受影响，删掉的动作下次点开再点一下「下载」就能补回来。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        clipStore.clearDownloaded()
+                        showClipClear = false
+                    },
+                ) { Text("清理") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClipClear = false }) { Text("取消") }
+            },
         )
     }
 }
@@ -464,8 +512,9 @@ private fun AboutDialog(
                 )
                 Text(
                     text = "训练计划、历史成绩、技能进度全部存在本机数据库里。" +
-                        "只有你在「AI 教练」里提问时，才会把训练摘要发给你自己配置的那个服务商，" +
-                        "其余时间 App 不联网。",
+                        "只有你在「AI 教练」里提问时，才会把训练摘要发给你自己配置的那个服务商；" +
+                        "另外，你点「下载」补动作演示短片时会去 GitHub 拉取。" +
+                        "除此之外 App 不联网。",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
@@ -538,4 +587,10 @@ private fun openNotificationSettings(context: Context) {
         .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
     runCatching { context.startActivity(intent) }
         .onFailure { runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS)) } }
+}
+
+/** 下载占用的展示：不到 1 MB 用 KB，避免「0.0 MB」这种没信息量的写法。 */
+private fun clipSizeLabel(bytes: Long): String {
+    if (bytes < 1024 * 1024) return "${(bytes / 1024).coerceAtLeast(1)} KB"
+    return String.format(java.util.Locale.US, "%.1f MB", bytes / 1048576.0)
 }

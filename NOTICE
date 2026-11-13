@@ -21,7 +21,8 @@ Copyright (C) 2026 FitGym contributors
 
 2. 动作演示图与演示短片
    文件：app/src/main/assets/gifs/*.webp（2303 张单帧静态图）
-         app/src/main/assets/clips/*.mp4（51 个动作短片，常用动作）
+         app/src/main/assets/clips/*.mp4（989 个动作短片，内置）
+         运行时按需下载的短片（GitHub raw / jsDelivr 上的同一批上游文件）
    版权：© Aliaksandr Makatserchyk, Gym visual —— https://gymvisual.com/
    上游授权范围（引自 openGym README 的 Important 段）：
      「The exercise media is not covered by that license. The stills and

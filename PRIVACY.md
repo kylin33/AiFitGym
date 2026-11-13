@@ -1,6 +1,6 @@
 # FitGym 隐私政策
 
-**更新日期：2026 年 11 月 11 日**
+**更新日期：2026 年 11 月 13 日**
 
 适用版本：`io.github.kylin33.aifitgym`（Android）
 
@@ -11,8 +11,8 @@
 ## 一句话概括
 
 FitGym 没有账号体系，不收集、不上传你的任何个人信息。训练计划、历史成绩、
-技能进度全部存在这台手机上。App 里唯一会联网的地方是「AI 教练」，
-而它连的是你自己填的地址。
+技能进度全部存在这台手机上。会联网的只有两处：你主动使用的「AI 教练」
+（连的是你自己填的地址），以及你主动下载动作演示短片时。
 
 ---
 
@@ -30,6 +30,7 @@ FitGym 没有账号体系，不收集、不上传你的任何个人信息。训�
 | 训练计划、每场训练、每组成绩、技能树等级 | Room 数据库 | 位于应用私有目录，其他 App 无权读取，卸载即删 |
 | AI 服务商地址、模型名、训练目标与水平 | SharedPreferences | 本地偏好文件 |
 | API Key | SharedPreferences（密文） | 使用 Android Keystore 中的设备密钥做 AES-GCM 加密，明文不落盘、不进日志 |
+| 按需下载的动作演示短片 | `noBackupFilesDir/clips/` | 应用私有目录，不参与系统云备份，卸载即删 |
 | 导出的备份文件 | 你指定的位置 | 由系统文件选择器写入，**不含** API Key 与 AI 对话 |
 
 App 不申请存储权限，不会往相册、下载目录或外部存储写任何文件。
@@ -46,7 +47,7 @@ API Key 即使被备份到云端，也无法在其它设备上解密——解密
 
 ## 4. 什么情况下数据会离开这台手机
 
-只有一种情况：**你主动在「AI 教练」里发送消息**。
+### 情况一：你主动在「AI 教练」里发送消息
 
 - **发给谁**：你在「AI 教练 → 设置」里填写的 Base URL。它可能是 DeepSeek、OpenAI、
   某个第三方中转站，也可能是你自己电脑上运行的 Ollama。地址由你填写，App 不预设服务商。
@@ -60,6 +61,17 @@ API Key 即使被备份到云端，也无法在其它设备上解密——解密
 - **是否加密**：取决于你填写的地址。`https://` 全程加密；`http://` 为明文，
   设置页会在地址框下方给出警告。
 
+### 情况二：你点「下载」补某个动作的演示短片
+
+- **发给谁**：`raw.githubusercontent.com`（项目上游素材所在的 GitHub 仓库）及其
+  jsDelivr CDN `cdn.jsdelivr.net`。
+- **发什么**：只有动作编号（例如 `1465.mp4` 的路径）和一句固定的 User-Agent。
+  不含训练数据、不含任何标识符。
+- **对方能看到什么**：和任何联网一样，能看到你的 IP 地址与请求时间。
+- **不发也行**：不点下载就完全不会发生；缺演示的动作照常显示静态图。
+
+除此之外没有第三种情况：不下载短片、不开 AI 教练，App 完全离线可用。
+
 ## 5. 第三方服务商
 
 数据一旦发给你配置的服务商，即同时受该服务商的隐私政策约束。FitGym 无法控制
@@ -71,7 +83,7 @@ App 本身不内置任何第三方分析、广告、推送或社交 SDK。
 
 | 权限 | 用途 |
 | --- | --- |
-| `INTERNET` | 仅用于访问你配置的 AI 地址 |
+| `INTERNET` | 访问你配置的 AI 地址；以及你点「下载」时抓取动作演示短片 |
 | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_SPECIAL_USE` | 组间倒计时在锁屏、切后台时继续运行 |
 | `POST_NOTIFICATIONS` | 在通知栏显示倒计时与操作按钮；不授权时计时照常，只是锁屏看不见 |
 | `WAKE_LOCK` | 息屏后让 CPU 不完全挂起，否则提示音会迟到 |
@@ -84,6 +96,8 @@ App 本身不内置任何第三方分析、广告、推送或社交 SDK。
 - **带走**：「我的 → 数据备份与恢复 → 导出」，得到一个 JSON 文件，随你处置。
 - **删除训练数据**：「我的 → 清空所有数据」，会连同计划、历史、技能进度一起删除，
   内置动作库保留。
+- **删除已下载的短片**：「我的 → 通用 → 演示短片」，一键清掉按需下载的那批，
+  内置短片不受影响。
 - **全部删除**：直接卸载 App，应用私有目录里的数据会被系统一并清除。
 - **不让任何数据离开手机**：不使用 AI 教练即可，其余功能完全离线。
 
@@ -108,7 +122,7 @@ App 本身不内置任何第三方分析、广告、推送或社交 SDK。
 
 FitGym does not collect or upload any personal data. There is no account, no analytics,
 no crash reporting and no ad SDK. All workout data stays in the app's private storage on
-your device. The only network request the app ever makes is the one you explicitly trigger
-in the AI Coach, and it goes to the endpoint **you** configure — it is never sent to the
-developer. Your API key is encrypted with an Android Keystore–bound AES-GCM key.
+your device. The app makes network requests only when you explicitly trigger them: the AI
+Coach (which talks to the endpoint **you** configure, never to the developer) and optional
+on-demand download of exercise demo clips from the upstream GitHub repository. Your API key is encrypted with an Android Keystore–bound AES-GCM key.
 The app is licensed under AGPL-3.0 and is provided "as is"; see [DISCLAIMER.md](DISCLAIMER.md).

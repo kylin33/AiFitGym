@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.kylin33.aifitgym.data.anatomy.MuscleScoring
 import io.github.kylin33.aifitgym.data.local.ExerciseEntity
+import io.github.kylin33.aifitgym.ui.components.ClipDownloadAction
 import io.github.kylin33.aifitgym.ui.components.ExerciseClip
 import io.github.kylin33.aifitgym.ui.components.MuscleHeatmap
 import io.github.kylin33.aifitgym.ui.components.muscleBaseColor
@@ -107,6 +108,12 @@ fun ExercisePreviewSheet(
                     SheetTags(exercise)
                 }
             }
+
+            // 没有内置短片时给一行「下载」；下载完这个组件自己消失，演示图换成循环播放
+            ClipDownloadAction(
+                exerciseId = exercise.id,
+                modifier = Modifier.padding(top = 8.dp),
+            )
 
             Spacer(Modifier.height(18.dp))
 

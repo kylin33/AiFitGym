@@ -82,7 +82,7 @@ README 只保留上手需要的信息，这里是实现层面的记录：为什�
 | --- | --- |
 | `exercises.json` | 2303 个动作，含中英文名、部位、目标肌群、副肌群、器械、步骤（1.7 MB） |
 | `gifs/<id>.webp` | 与动作一一对应的**单帧**示意图，2303 张（10.6 MB） |
-| `clips/<id>.mp4` | 常用动作的动态演示，51 个（1.6 MB），见下文 |
+| `clips/<id>.mp4` | 主打动作的动态演示，989 个（24 MB），见下文 |
 | `taxonomy.json` | 部位 / 分类枚举及计数，调试参考用 |
 | `anatomy/` | 人体热力图资源（见下节） |
 
@@ -95,29 +95,55 @@ README 只保留上手需要的信息，这里是实现层面的记录：为什�
 **180×180、约 9 秒、H.264、faststart（moov 在文件头）**，中位 23 KB、最大 79 KB。
 分辨率与静态图一致，所以换成短片不会更糊，只是会动。
 
-全量 2303 个约 63 MB，对 APK 太重，因此只内置**常用动作**：48 个技能树主干
-（`exercises.json` 里带 `skillLevel` 的）加三套内置模板用到的动作，去重后 51 个、1.6 MB。
-其余动作显示静态图，两者尺寸相同，界面不会跳。
+全量 2303 个约 56 MB（均 25 KB），整个塞进安装包就是 70 MB 的 APK，太重。折中是**内置主打动作、
+冷门动作按需下载**：
+
+| | 数量 | 体积 | 位置 |
+| --- | --- | --- | --- |
+| 随 APK 内置 | 989（徒手 865 + 力量 104，另补主干与模板用到的 20 个） | 24 MB | `assets/clips/` |
+| 按需下载 | 1314（拉伸 408、柔韧 253、爆发力 180、有氧 145、等长 134、瑜伽 109、普拉提 47、搏击 36、康复 22） | 32 MB | `noBackupFilesDir/clips/` |
 
 ```bash
-python tools/fetch_clips.py            # 默认集合（51 个）
-python tools/fetch_clips.py --all      # 全量（约 63 MB）
+python tools/fetch_clips.py            # 内置集合（989 个，约 24 MB）
+python tools/fetch_clips.py --all      # 全量（约 56 MB）
 python tools/fetch_clips.py --ids 2308 --force
 ```
 
-脚本从 raw.githubusercontent 并发拉取，幂等（已存在且是合法 mp4 就跳过），
-先写 `.part` 再改名，中断不会留下半截文件被当成已下载。
+脚本并发拉取，幂等（已存在且是合法 mp4 就跳过），先写 `.part` 再改名，
+中断不会留下半截文件被当成已下载。
 
-播放用 Media3 ExoPlayer，URI 直接是 `asset:///clips/<id>.mp4`（`AssetDataSource` 原生支持），
-不用先拷到磁盘。两个必须的配置：
+#### 按需下载
+
+入口在动作抽屉与详情页（`ClipDownloadAction`）：缺片时显示一行
+「演示短片未内置，可下载补全 · 下载」，点一下下到私有目录，下完当场从静态图
+切成循环播放，不用退出重进。**我的 → 通用 → 演示短片** 能看到占用并一键清理。
+
+四个刻意的选择：
+
+- **存 `noBackupFilesDir`**：manifest 里 `allowBackup=true`，`filesDir` 会被算进
+  Google 云备份 —— 几十 MB 短片同步上去既没意义又费流量；`cacheDir` 更不行，
+  系统清缓存会把用户「下载过」的片子删掉。
+- **不落数据库**：文件在不在就是唯一状态。省一次 Room 迁移，也不会出现
+  「库里说有、文件被删了」这种半截状态；启动时扫一遍目录得到集合。
+- **两个源**：jsDelivr（国内更通）→ raw.githubusercontent（CDN 还没同步的新动作只有它）。
+  两个都失败才报错，异常翻成人话（网络不可用 / 连接超时 / 连不上服务器）。
+- **`.part` 再改名 + ftyp 校验**：半截文件不会被当成已下载。
+
+#### 播放
+
+Media3 ExoPlayer：内置片用 `asset:///clips/<id>.mp4`（`AssetDataSource` 原生支持），
+下载片用 `file://`，同一个 `ExerciseClip` 都吃。三个必须的配置：
 
 - `androidResources { noCompress += "mp4" }`：被压缩的 asset 拿不到文件描述符，
   `openFd()` 会失败，还会多占一份内存。
 - `ExerciseClip` 在 `DisposableEffect` 里 `release()`：不释放的话解码器一直被占着，
   在动作之间来回切会 OOM；同时按 `ON_STOP / ON_START` 暂停与续播。
+- 播放器 `remember(uri)`：下载完成后 `ClipStore.available` 变了、uri 也变了，
+  播放器随之重建，抽屉不关也能出画面。
 
-没有短片的动作自动回退到 `ExerciseImage`，判断依据是 `assets.list("clips")` 的结果
-（进程内缓存一份），比逐个 `open()` 撞异常便宜得多。
+没有短片的动作自动回退到 `ExerciseImage`，两者尺寸相同，界面不会跳。
+判断依据是 `ClipStore.available`（assets 目录一次列全 + 已下载集合），
+比逐个 `open()` 撞异常便宜得多。
 
 ### 重新生成
 
@@ -296,7 +322,9 @@ keyPassword=…
 
 ### R8
 
-`release` 开了 `isMinifyEnabled` + `isShrinkResources`，26 MB → **14 MB**。
+`release` 开了 `isMinifyEnabled` + `isShrinkResources`，dex 侧 26 MB → **14 MB**。
+内置短片扩到 989 个之后成品是 **41 MB** —— 这 24 MB 是 mp4 本身，R8 碰不到
+（`noCompress` 还要求它们保持不压缩），能省的只有代码与资源那部分。
 规则见 `app/proguard-rules.pro`，重点是三处：
 
 | 谁 | 为什么容易被裁掉 |

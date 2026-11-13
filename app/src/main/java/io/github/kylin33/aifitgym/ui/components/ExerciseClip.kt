@@ -1,6 +1,5 @@
 package io.github.kylin33.aifitgym.ui.components
 
-import android.content.Context
 import android.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -8,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -16,6 +16,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -26,9 +27,9 @@ import androidx.media3.ui.PlayerView
  * 动作演示：有短片就静音循环播放，没有就退回静态图。
  *
  * 上游的 `media/still/<id>.webp` 是**单帧**图（180×180、约 5 KB），动作过程只在
- * `media/clip/<id>.mp4` 里（同样 180×180、约 9 秒）。短片太大不方便全量内置，
- * 所以 assets/clips/ 里只放常用动作，其余动作显示静态图 —— 两种情况尺寸一致，
- * 界面不会跳。
+ * `media/clip/<id>.mp4` 里（同样 180×180、约 9 秒）。片子总量六十多 MB，
+ * 所以 APK 里只内置徒手 + 力量这一批，其余在抽屉里按需下载（见 ClipDownloadAction）——
+ * 两种情况尺寸一致，界面不会跳。
  */
 @Composable
 fun ExerciseClip(
@@ -39,7 +40,12 @@ fun ExerciseClip(
     contentScale: ContentScale = ContentScale.Fit,
 ) {
     val context = LocalContext.current
-    if (!ClipAssets.has(context, exerciseId)) {
+    val store = rememberClipStore()
+    // 订阅可用集合：在抽屉里下载完，这里会自己换成播放器，不需要退出重进
+    val available by store.available.collectAsStateWithLifecycle()
+    val uri = remember(exerciseId, available) { store.uriFor(exerciseId) }
+
+    if (uri == null) {
         ExerciseImage(
             path = imagePath,
             contentDescription = contentDescription,
@@ -49,9 +55,9 @@ fun ExerciseClip(
         return
     }
 
-    val exoPlayer = remember(exerciseId) {
+    val exoPlayer = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri("asset:///clips/$exerciseId.mp4"))
+            setMediaItem(MediaItem.fromUri(uri))
             // 演示片是循环动作：往复循环、静音、一进页面就播
             repeatMode = Player.REPEAT_MODE_ONE
             volume = 0f
@@ -98,36 +104,5 @@ fun ExerciseClip(
             update = { view -> view.player = exoPlayer },
             onRelease = { view -> view.player = null },
         )
-    }
-}
-
-/**
- * `assets/clips/` 里到底有哪些短片。
- *
- * 每个动作都去 `assets.open()` 试一次会抛大量异常，直接列目录拿集合，进程内缓存一份。
- * 目前只有几十个文件，同步读取的开销远小于一次 IO 线程切换带来的首帧闪烁。
- */
-internal object ClipAssets {
-
-    @Volatile
-    private var ids: Set<String>? = null
-
-    fun has(context: Context, exerciseId: String): Boolean = available(context).contains(exerciseId)
-
-    private fun available(context: Context): Set<String> {
-        ids?.let { return it }
-        synchronized(this) {
-            ids?.let { return it }
-            val loaded = runCatching {
-                context.assets.list("clips")
-                    ?.asSequence()
-                    ?.filter { it.endsWith(".mp4", ignoreCase = true) }
-                    ?.map { it.substringBeforeLast('.') }
-                    ?.toSet()
-                    .orEmpty()
-            }.getOrDefault(emptySet())
-            ids = loaded
-            return loaded
-        }
     }
 }
