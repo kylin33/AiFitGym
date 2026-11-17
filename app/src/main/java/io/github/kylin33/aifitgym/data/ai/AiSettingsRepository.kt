@@ -74,8 +74,29 @@ class AiSettingsRepository(context: Context) {
 
     private fun readPreferences(): AiPreferences {
         val raw = prefs.getString(KEY_PREFERENCES, null) ?: return AiPreferences()
-        return runCatching { json.decodeFromString(AiPreferences.serializer(), raw) }
-            .getOrElse { AiPreferences() }
+        val parsed = runCatching { json.decodeFromString(AiPreferences.serializer(), raw) }
+            .getOrElse { return AiPreferences() }
+        return parsed.migrated()
+    }
+
+    /**
+     * 老版本的伤病存在 `injuries` 里，现在拆成了 `limitations`。
+     *
+     * 不迁移的话，升级后用户在设置页会看到一个空的「伤病 / 禁忌」，
+     * 而 AI 也不再说红线 —— 一条真实存在的旧伤就这么静默消失了。
+     * 只在内存里搬，下次任何字段改动都会连带把新结构写回磁盘。
+     */
+    private fun AiPreferences.migrated(): AiPreferences {
+        val p = profile
+        if (p.limitations.isNotBlank() || p.injuries.isBlank()) return this
+        return copy(
+            profile = p.copy(
+                limitations = p.injuries.trim(),
+                injuries = "",
+                // 老版本这个字段是手打进去的，一定是他自己说的
+                confirmed = p.confirmed + ProfileField.LIMITATIONS,
+            ),
+        )
     }
 
     private companion object {

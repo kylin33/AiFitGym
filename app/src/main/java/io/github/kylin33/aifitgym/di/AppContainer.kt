@@ -7,6 +7,7 @@ import io.github.kylin33.aifitgym.data.ai.AiSettingsRepository
 import io.github.kylin33.aifitgym.data.ai.CoachChatStore
 import io.github.kylin33.aifitgym.data.ai.CoachContextBuilder
 import io.github.kylin33.aifitgym.data.ai.CoachRepository
+import io.github.kylin33.aifitgym.data.ai.TrainingStatsBuilder
 import io.github.kylin33.aifitgym.data.backup.BackupRepository
 import io.github.kylin33.aifitgym.data.checkpoint.CheckpointStore
 import io.github.kylin33.aifitgym.data.clip.ClipStore
@@ -172,6 +173,10 @@ class AppContainer(context: Context) {
                 exerciseDao = database.exerciseDao(),
                 sessionDao = database.workoutSessionDao(),
                 progressDao = database.branchProgressDao(),
+                statsBuilder = TrainingStatsBuilder(
+                    sessionDao = database.workoutSessionDao(),
+                    exerciseDao = database.exerciseDao(),
+                ),
             ),
         )
     }

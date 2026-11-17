@@ -19,6 +19,11 @@ data class CoachContext(
     val snapshot: String,
     val poolText: String,
     val poolSize: Int,
+    val stats: TrainingStats = TrainingStats(
+        last7 = WindowStats(days = 7),
+        prev7 = WindowStats(days = 7),
+        last30 = WindowStats(days = 30),
+    ),
 )
 
 /**
@@ -41,6 +46,7 @@ class CoachContextBuilder(
     private val exerciseDao: ExerciseDao,
     private val sessionDao: WorkoutSessionDao,
     private val progressDao: BranchProgressDao,
+    private val statsBuilder: TrainingStatsBuilder,
 ) {
 
     private val dayFormat = SimpleDateFormat("MM-dd", Locale.getDefault())
@@ -68,10 +74,15 @@ class CoachContextBuilder(
             .distinctBy { it.id }
             .take(MAX_POOL)
 
+        // 统计与简报分开算：统计只依赖 sessionDao，简报还要动作库和进度
+        val stats = statsBuilder.build(now)
+
         return CoachContext(
-            snapshot = buildSnapshot(preferences, progress, bosses, since30),
+            snapshot = buildSnapshot(preferences, progress, bosses, since30) +
+                "\n\n" + stats.toPromptText(),
             poolText = pool.joinToString("\n") { it.toPoolLine() },
             poolSize = pool.size,
+            stats = stats,
         )
     }
 
@@ -87,22 +98,46 @@ class CoachContextBuilder(
         val sb = StringBuilder()
 
         sb.append("【用户】")
-        sb.append("目标 ").append(profile.goal.ifBlank { "未填写（可以问他）" })
-        sb.append("｜每周 ").append(profile.daysPerWeek).append(" 练")
-        sb.append("｜单次约 ").append(profile.sessionMinutes).append(" 分钟")
-        sb.append("｜水平 ").append(profile.level)
-        if (profile.trainingDays.isNotEmpty()) {
-            sb.append("｜能练 ").append(profile.trainingDays.joinToString("/") { weekLabel(it) })
-        } else {
-            sb.append("｜没指定具体哪几天")
+        sb.append("目标 ").append(profile.goal.trim().ifBlank { "未填（排计划前先问）" })
+        sb.append("｜水平 ").append(sourceMark(profile, ProfileField.LEVEL, profile.level))
+        if (profile.experience.isNotBlank()) {
+            sb.append("｜经验 ").append(profile.experience)
         }
+        sb.append("｜每周 ")
+            .append(sourceMark(profile, ProfileField.DAYS_PER_WEEK, "${profile.daysPerWeek} 次"))
+        sb.append("｜单次 ")
+            .append(sourceMark(profile, ProfileField.SESSION_MINUTES, "${profile.sessionMinutes} 分钟"))
+        sb.append("｜能练 ").append(
+            if (profile.trainingDays.isEmpty()) {
+                "未指定"
+            } else {
+                profile.trainingDays.joinToString("/") { weekLabel(it) }
+            },
+        )
         sb.append('\n')
+
         // 伤病单独一行并且放最前面：它是提示词里的红线，混在器械备注里会被漏掉
-        if (profile.injuries.isNotBlank()) {
-            sb.append("【伤病 / 疼痛】").append(profile.injuries.trim()).append('\n')
+        sb.append("【伤病 / 疼痛 / 禁忌】")
+            .append(profile.limitations.trim().ifBlank { "未填" })
+            .append('\n')
+        sb.append("【可用器械】")
+            .append(profile.equipment.joinToString("、").ifBlank { "未填" })
+            .append('\n')
+        if (profile.preferredFocus.isNotEmpty()) {
+            sb.append("【偏好】").append(profile.preferredFocus.joinToString("、")).append('\n')
+        }
+        if (profile.availableSpace.isNotBlank()) {
+            sb.append("【训练空间】").append(profile.availableSpace.trim()).append('\n')
         }
         if (profile.notes.isNotBlank()) {
-            sb.append("【器械 / 作息】").append(profile.notes.trim()).append('\n')
+            sb.append("【其他备注】").append(profile.notes.trim()).append('\n')
+        }
+        // 关键项缺口直接点名，省得模型自己扫一遍还漏 —— 这是「档案完整度」唯一的用处
+        val missing = profile.missingCritical()
+        if (missing.isNotEmpty()) {
+            sb.append("【档案缺口】")
+                .append(missing.joinToString("、") { ProfileField.label(it) })
+                .append(" 还没填，上面的值是默认值不是他说的\n")
         }
 
         // 流派进度：只写有数据的，6 条全写上占地方
@@ -172,6 +207,16 @@ class CoachContextBuilder(
 
         return sb.toString().trimEnd()
     }
+
+    /**
+     * 给「有默认值」的项标来源。
+     *
+     * 不标的话，「水平 新手」会被模型当成用户自述 —— 一个练了三年的人
+     * 因为没动过设置里的默认值，就被按新手排一整套，这比不填还糟。
+     * 用「未确认」而不是「默认值」：老数据里升级前填过的值同样无法确认是谁填的。
+     */
+    private fun sourceMark(profile: AiProfile, field: String, value: String): String =
+        if (profile.isConfirmed(field) || value.isBlank()) value else "$value（未确认）"
 
     private fun weekLabel(day: Int): String = when (day) {
         1 -> "周一"

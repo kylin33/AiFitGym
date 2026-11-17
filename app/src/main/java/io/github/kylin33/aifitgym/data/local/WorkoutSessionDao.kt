@@ -39,6 +39,28 @@ data class SessionSummary(
     val durationSec: Int,
 )
 
+/**
+ * 某动作在某次训练里的表现。
+ *
+ * 趋势判断的原料。按「动作 × 训练」聚合成一条，[bestReps] 取这一场的最好单组 ——
+ * 一次练了 12/10/8/6，代表能力的是 12；把 6 也算进趋势，会把「第一组就累了」
+ * 误判成「退步了」。
+ */
+data class SessionPerformance(
+    val sessionId: Long,
+    val exerciseId: String,
+    val startedAt: Long,
+    val sets: Int,
+    val bestReps: Int,
+    val bestSeconds: Int,
+) {
+    /** 这次是计时动作还是计次动作。 */
+    val isTimed: Boolean get() = bestSeconds > 0 && bestReps == 0
+
+    /** 这次的代表成绩：计次看次数，计时看秒数。 */
+    val value: Int get() = if (isTimed) bestSeconds else bestReps
+}
+
 /** 历史列表的一行：总记录 + 组数快照。 */
 data class SessionHeader(
     val sessionId: Long,
@@ -241,6 +263,29 @@ interface WorkoutSessionDao {
      */
     @Query("SELECT COUNT(*) FROM workout_sessions WHERE endTime = 0")
     suspend fun unfinishedCount(): Int
+
+    /**
+     * 时间窗内「每个动作、每次训练」的表现，趋势分析的原料。
+     *
+     * 只多一个查询就把 7 天 / 30 天的训练日、组数、流派分布、表现趋势全部算完，
+     * 不必让模型去读几百条原始组记录 —— 它数不准，也没那么多 token。
+     */
+    @Query(
+        """
+        SELECT s.sessionId AS sessionId,
+               s.exerciseId AS exerciseId,
+               w.startTime AS startedAt,
+               COUNT(*) AS sets,
+               COALESCE(MAX(s.actualReps), 0) AS bestReps,
+               COALESCE(MAX(s.actualDurationSec), 0) AS bestSeconds
+        FROM workout_set_logs s
+        JOIN workout_sessions w ON w.sessionId = s.sessionId
+        WHERE w.startTime >= :since AND w.startTime <= :until
+        GROUP BY s.exerciseId, s.sessionId
+        ORDER BY w.startTime
+        """
+    )
+    suspend fun performancesBetween(since: Long, until: Long): List<SessionPerformance>
 
     /**
      * 该动作「单场累计」的最高次数（不分单组），累计类节点用。

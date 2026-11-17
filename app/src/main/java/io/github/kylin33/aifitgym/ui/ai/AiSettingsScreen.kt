@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -52,7 +51,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.kylin33.aifitgym.data.ai.AI_PRESETS
+import io.github.kylin33.aifitgym.data.ai.AiProfile
 import io.github.kylin33.aifitgym.data.ai.AiProviderPreset
+import io.github.kylin33.aifitgym.data.ai.EQUIPMENT_OPTIONS
+import io.github.kylin33.aifitgym.data.ai.EXPERIENCE_OPTIONS
+import io.github.kylin33.aifitgym.data.ai.FOCUS_OPTIONS
+import io.github.kylin33.aifitgym.data.ai.ProfileField
 import io.github.kylin33.aifitgym.data.ai.AiSettingsState
 import io.github.kylin33.aifitgym.data.ai.EndpointSecurity
 import io.github.kylin33.aifitgym.data.ai.classifyEndpoint
@@ -80,7 +84,11 @@ fun AiSettingsScreen(
     onDaysChange: (Int) -> Unit,
     onMinutesChange: (Int) -> Unit,
     onNotesChange: (String) -> Unit,
-    onInjuriesChange: (String) -> Unit,
+    onLimitationsChange: (String) -> Unit,
+    onExperienceChange: (String) -> Unit,
+    onToggleEquipment: (String) -> Unit,
+    onToggleFocus: (String) -> Unit,
+    onSpaceChange: (String) -> Unit,
     onToggleTrainingDay: (Int) -> Unit,
     onAutoCoachChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -290,14 +298,16 @@ fun AiSettingsScreen(
             Spacer(Modifier.height(10.dp))
         }
 
-        item(key = "profile_label") { SectionLabel("我的训练目标") }
+        item(key = "profile_label") { SectionLabel("我的档案") }
         item(key = "profile_hint") {
             Text(
                 text = "这些会写进每次对话的背景里，AI 排计划时才知道你要练成什么样。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
             )
+            ProfileCompleteness(profile)
+            Spacer(Modifier.height(12.dp))
         }
 
         item(key = "goal") {
@@ -324,6 +334,30 @@ fun AiSettingsScreen(
                     )
                 }
             }
+        }
+
+        item(key = "experience") {
+            Spacer(Modifier.height(12.dp))
+            FieldLabel("训练经验")
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                EXPERIENCE_OPTIONS.forEach { option ->
+                    FilterChip(
+                        selected = profile.experience == option,
+                        onClick = { onExperienceChange(option) },
+                        label = { Text(option) },
+                    )
+                }
+            }
+            Text(
+                text = "练了多久、有没有断过。和上面的自评水平不是一回事：" +
+                    "练过两年但停了半年的，AI 会按重新开始排。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+            )
         }
 
         item(key = "days") {
@@ -369,33 +403,79 @@ fun AiSettingsScreen(
             )
         }
 
-        item(key = "injuries") {
-            Spacer(Modifier.height(12.dp))
+        item(key = "limitations") {
+            Spacer(Modifier.height(16.dp))
             OutlinedTextField(
-                value = profile.injuries,
-                onValueChange = onInjuriesChange,
+                value = profile.limitations,
+                onValueChange = onLimitationsChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("伤病 / 疼的部位") },
-                placeholder = { Text("右肩有旧伤，深蹲时膝盖会响") },
-                minLines = 1,
-                maxLines = 3,
+                label = { Text("伤病 / 疼痛 / 禁忌动作") },
+                placeholder = { Text("右肩有旧伤，过顶推举会疼；深蹲到底膝盖响") },
+                minLines = 2,
+                maxLines = 4,
             )
             Text(
-                text = "这条会作为红线：涉及疼痛时教练会先让你停练，而不是让你再坚持一组。",
+                text = "最重要的一项：涉及这里写的部位时，教练会先让你停练或换动作，" +
+                    "不会说「忍一下」。没有就写「无」。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+            )
+        }
+
+        item(key = "equipment") {
+            Spacer(Modifier.height(16.dp))
+            FieldLabel("可用器械")
+            ChipFlow(
+                options = EQUIPMENT_OPTIONS,
+                selected = profile.equipment,
+                onToggle = onToggleEquipment,
+            )
+            Text(
+                text = "勾了它，AI 才不会给你排「需要引体向上杠」但你根本没杠的计划。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
                 modifier = Modifier.padding(start = 4.dp, top = 6.dp),
             )
         }
 
+        item(key = "focus") {
+            Spacer(Modifier.height(16.dp))
+            FieldLabel("想加强的部位 / 方向（可不选）")
+            ChipFlow(
+                options = FOCUS_OPTIONS,
+                selected = profile.preferredFocus,
+                onToggle = onToggleFocus,
+            )
+            Text(
+                text = "只影响「优先排哪些」：不会因为选了胸就把腿完全去掉。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+            )
+        }
+
+        item(key = "space") {
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = profile.availableSpace,
+                onValueChange = onSpaceChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("训练空间（可不填）") },
+                placeholder = { Text("客厅 2×2 米，楼上有人，不能跳") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            )
+        }
+
         item(key = "notes") {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = profile.notes,
                 onValueChange = onNotesChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("器械、作息") },
-                placeholder = { Text("家里只有单杠和瑜伽垫，晚上十点后不方便练") },
+                label = { Text("其他备注（可不填）") },
+                placeholder = { Text("晚上十点后不方便练，膝盖不好时不做跳跃") },
                 minLines = 2,
                 maxLines = 4,
             )
@@ -513,6 +593,63 @@ fun AiSettingsScreen(
                 TextButton(onClick = { showAutoCoachConfirm = false }) { Text("先不用") }
             },
         )
+    }
+}
+
+/**
+ * 档案完整度。
+ *
+ * 只报「关键项还缺什么」，不追求填满 11 项 —— 全都填完才敢排计划的话，
+ * 没人会用这个功能。缺关键项时用警示色说明「AI 会先问你」，别让它看起来像报错。
+ */
+@Composable
+private fun ProfileCompleteness(profile: AiProfile) {
+    val missing = profile.missingCritical()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "档案已填 ${profile.filledCount}/${ProfileField.ALL.size} 项",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = if (missing.isEmpty()) {
+                "关键项齐了：AI 可以直接排计划，不用再问你。"
+            } else {
+                "关键项还缺「${missing.joinToString("、") { ProfileField.label(it) }}」——" +
+                    "不填的话 AI 会先问一句，或者按默认值猜。"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = if (missing.isEmpty()) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+        )
+    }
+}
+
+/** 一排可多选的取值，用于器械、偏好这类固定选项。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChipFlow(options: List<String>, selected: List<String>, onToggle: (String) -> Unit) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { option ->
+            FilterChip(
+                selected = option in selected,
+                onClick = { onToggle(option) },
+                label = { Text(option) },
+            )
+        }
     }
 }
 
