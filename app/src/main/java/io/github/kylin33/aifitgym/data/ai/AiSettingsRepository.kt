@@ -48,6 +48,11 @@ class AiSettingsRepository(context: Context) {
         update { it.copy(profile = profile) }
     }
 
+    /** 全程 AI 教练开关。关掉时不清历史、不动计划，只是不再露出复盘入口。 */
+    fun saveAutoCoach(enabled: Boolean) {
+        update { it.copy(autoCoach = enabled) }
+    }
+
     /** 空串表示清除。 */
     fun saveApiKey(key: String?) {
         val trimmed = key?.trim().orEmpty()

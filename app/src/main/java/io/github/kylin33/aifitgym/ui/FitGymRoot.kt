@@ -45,6 +45,8 @@ import io.github.kylin33.aifitgym.ui.ai.AiSettingsScreen
 import io.github.kylin33.aifitgym.ui.ai.AiSettingsViewModel
 import io.github.kylin33.aifitgym.ui.ai.CoachScreen
 import io.github.kylin33.aifitgym.ui.ai.CoachViewModel
+import io.github.kylin33.aifitgym.ui.ai.SessionReviewScreen
+import io.github.kylin33.aifitgym.ui.ai.SessionReviewViewModel
 import io.github.kylin33.aifitgym.ui.backup.BackupScreen
 import io.github.kylin33.aifitgym.ui.backup.BackupViewModel
 import io.github.kylin33.aifitgym.ui.components.SeedErrorScreen
@@ -103,6 +105,9 @@ object Routes {
     const val COACH = "coach"
     const val AI_SETTINGS = "ai_settings"
 
+    /** 练完复盘：只针对某一场训练，所以带 sessionId。 */
+    const val REVIEW = "review/{$SESSION_ID}"
+
     /** 法律文本：两条独立路由，从「我的 → 通用」进。 */
     const val PRIVACY = "legal/privacy"
     const val DISCLAIMER = "legal/disclaimer"
@@ -121,6 +126,8 @@ object Routes {
     fun workoutExercise(exerciseId: String) = "workout_exercise/$exerciseId"
 
     fun session(sessionId: Long) = "session/$sessionId"
+
+    fun review(sessionId: Long) = "review/$sessionId"
 
     fun exercise(id: String) = "exercise/$id"
 }
@@ -527,6 +534,33 @@ private fun AppNavHost(
                 onDaysChange = aiSettingsViewModel::setDays,
                 onMinutesChange = aiSettingsViewModel::setMinutes,
                 onNotesChange = aiSettingsViewModel::setNotes,
+                onInjuriesChange = aiSettingsViewModel::setInjuries,
+                onToggleTrainingDay = aiSettingsViewModel::toggleTrainingDay,
+                onAutoCoachChange = aiSettingsViewModel::setAutoCoach,
+            )
+        }
+
+        composable(
+            route = Routes.REVIEW,
+            arguments = listOf(navArgument(Routes.SESSION_ID) { type = NavType.LongType }),
+        ) { entry ->
+            val sessionId = entry.arguments?.getLong(Routes.SESSION_ID) ?: 0L
+            val reviewViewModel: SessionReviewViewModel = viewModel(
+                key = "review-$sessionId",
+                factory = SessionReviewViewModel.Factory(container, sessionId),
+            )
+            val reviewState by reviewViewModel.state.collectAsStateWithLifecycle()
+            val reviewSettings by reviewViewModel.settings.collectAsStateWithLifecycle()
+            SessionReviewScreen(
+                state = reviewState,
+                settings = reviewSettings,
+                onFeedbackChange = reviewViewModel::setFeedback,
+                onSend = reviewViewModel::send,
+                onStop = reviewViewModel::stop,
+                onApply = reviewViewModel::applyProposal,
+                onDiscard = reviewViewModel::discardProposal,
+                onOpenSettings = { navController.navigate(Routes.AI_SETTINGS) },
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -632,6 +666,9 @@ private fun WorkoutRoute(
     RequestWorkoutNotificationPermission()
 
     val workoutState by workoutViewModel.state.collectAsStateWithLifecycle()
+    // 全程教练关着、或者 Key 没配，结算页就不出现复盘入口 —— 不留一个点进去只会报错的按钮
+    val aiState by container.aiSettings.state.collectAsStateWithLifecycle()
+    val canReview = aiState.ready && aiState.preferences.autoCoach && workoutState.sessionId > 0L
 
     ActiveWorkoutScreen(
         state = workoutState,
@@ -645,6 +682,11 @@ private fun WorkoutRoute(
         onDismissPromotions = workoutViewModel::dismissPromotions,
         onSwapPromoted = workoutViewModel::swapPromotedToNext,
         onExit = { navController.popBackStack() },
+        onReview = if (canReview) {
+            { navController.navigate(Routes.review(workoutState.sessionId)) }
+        } else {
+            null
+        },
     )
 }
 

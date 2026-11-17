@@ -69,6 +69,58 @@ class PlanBlockParserTest {
         assertNull(PlanBlockParser.parse("not json at all"))
     }
 
+    // ------------------------------------------------------------ 复盘：改计划块
+
+    private val updateBlock = """
+        {"targetRoutine":"推日 · 上肢推力","name":"推日 · 上肢推力",
+         "reason":"后半段掉得厉害，减一组","category":"CALISTHENICS",
+         "items":[{"exerciseId":"0653","sets":3,"reps":10,"restSec":90}]}
+    """.trimIndent()
+
+    @Test
+    fun split_extracts_update_block() {
+        val raw = "这次强度偏高了。\n\n```json_plan_update\n$updateBlock\n```"
+        val result = PlanBlockParser.split(raw)
+
+        assertEquals("这次强度偏高了。", result.text)
+        assertTrue(result.blocks.isEmpty())
+        assertEquals(1, result.updates.size)
+        assertTrue(result.updates.first().contains("targetRoutine"))
+    }
+
+    /** 有的模型会写 ```json 而不是 ```json_plan_update，认内容里的 targetRoutine。 */
+    @Test
+    fun split_treats_tagged_as_json_update_as_update() {
+        val raw = "改一下：\n```json\n$updateBlock\n```"
+        val result = PlanBlockParser.split(raw)
+
+        assertEquals(1, result.updates.size)
+        assertTrue(result.blocks.isEmpty())
+    }
+
+    @Test
+    fun split_hides_update_block_that_is_still_streaming() {
+        val raw = "我看了一下：\n```json_plan_update\n{\"targetRoutine\":\"推日\""
+        val result = PlanBlockParser.split(raw)
+
+        assertEquals("我看了一下：", result.text)
+        assertTrue(result.updates.isEmpty())
+        assertTrue(result.blocks.isEmpty())
+    }
+
+    @Test
+    fun parse_reads_target_routine() {
+        val parsed = PlanBlockParser.parse(updateBlock)
+
+        assertEquals("推日 · 上肢推力", parsed!!.targetRoutine)
+        assertEquals("0653", parsed.items.single().exerciseId)
+    }
+
+    @Test
+    fun parse_leaves_target_routine_empty_for_plain_plan() {
+        assertEquals("", PlanBlockParser.parse(block)!!.targetRoutine)
+    }
+
     @Test
     fun category_maps_chinese_and_aliases() {
         assertEquals(RoutineCategory.CALISTHENICS, PlanBlockParser.categoryOf("CALISTHENICS"))

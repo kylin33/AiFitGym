@@ -82,6 +82,28 @@ class AiSettingsViewModel(container: AppContainer) : ViewModel() {
 
     fun setNotes(value: String) = updateProfile { it.copy(notes = value) }
 
+    fun setInjuries(value: String) = updateProfile { it.copy(injuries = value) }
+
+    /**
+     * 勾选「哪几天能练」。
+     *
+     * 顺手把「每周练几次」同步成勾中的天数：两个字段说法不一致时，
+     * 提示词里会同时出现「每周 3 练」和「周一/周三/周五/周日」，模型只能猜一个。
+     */
+    fun toggleTrainingDay(day: Int) = updateProfile { profile ->
+        val next = if (day in profile.trainingDays) {
+            profile.trainingDays - day
+        } else {
+            profile.trainingDays + day
+        }.sorted()
+        profile.copy(
+            trainingDays = next,
+            daysPerWeek = if (next.isEmpty()) profile.daysPerWeek else next.size,
+        )
+    }
+
+    fun setAutoCoach(enabled: Boolean) = settings.saveAutoCoach(enabled)
+
     private fun updateProfile(transform: (AiProfile) -> AiProfile) {
         settings.saveProfile(transform(state.value.preferences.profile))
     }

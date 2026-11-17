@@ -166,6 +166,7 @@ class AppContainer(context: Context) {
         CoachRepository(
             exerciseDao = database.exerciseDao(),
             routineDao = database.routineDao(),
+            sessionDao = database.workoutSessionDao(),
             settings = aiSettings,
             contextBuilder = CoachContextBuilder(
                 exerciseDao = database.exerciseDao(),

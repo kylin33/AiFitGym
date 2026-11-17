@@ -38,6 +38,10 @@ interface RoutineDao {
     @Query("SELECT * FROM routines WHERE routineId = :routineId")
     suspend fun find(routineId: Long): RoutineEntity?
 
+    /** 复盘时要把现有计划名告诉模型（否则它会编一个 targetRoutine）。 */
+    @Query("SELECT * FROM routines WHERE archived = 0 ORDER BY updatedAt DESC")
+    suspend fun activeRoutines(): List<RoutineEntity>
+
     @Query("SELECT * FROM routine_exercises WHERE routineId = :routineId ORDER BY orderIndex")
     fun observeItems(routineId: Long): Flow<List<RoutineExerciseEntity>>
 

@@ -56,13 +56,33 @@ data class AiEndpoint(
 data class AiProfile(
     /** 目标，如「增肌」「减脂」「先练会引体向上」。 */
     val goal: String = "",
-    /** 训练水平：新手 / 有基础 / 进阶。 */
-    val level: String = "有基础",
+    /**
+     * 训练水平：新手 / 有基础 / 进阶。
+     *
+     * 默认「新手」而不是「有基础」：默认值就是绝大多数新装用户的实际状态，
+     * 猜高了模型一上手就排 4×10，用户做不完，第一印象就是「这 AI 不懂我」。
+     */
+    val level: String = "新手",
     /** 每周计划练几次。 */
     val daysPerWeek: Int = 3,
     /** 单次可接受时长（分钟）。 */
     val sessionMinutes: Int = 40,
-    /** 器械、伤病、作息等限制。 */
+    /**
+     * 具体哪几天能练：1=周一 … 7=周日，空表示不限。
+     *
+     * 只有「每周 3 次」的话，AI 没法排周计划（它不知道隔天练还是连练三天），
+     * 也没法回答「今天该练什么」。加了这行才谈得上「全程管理」。
+     */
+    val trainingDays: List<Int> = emptyList(),
+    /**
+     * 伤病 / 疼痛。故意和 [notes] 分开。
+     *
+     * 器械、作息写错顶多排得不顺手；伤病是要做红线的信息。混在一段自由文本里，
+     * 模型经常只抓走「有哑铃」而漏掉「右肩有旧伤」，所以这条单独进提示词、
+     * 并且在提示词里明确要求「涉及疼痛先停练」。
+     */
+    val injuries: String = "",
+    /** 器械、作息等其余限制。 */
     val notes: String = "",
 )
 
@@ -71,6 +91,12 @@ data class AiProfile(
 data class AiPreferences(
     val endpoint: AiEndpoint = AiEndpoint(),
     val profile: AiProfile = AiProfile(),
+    /**
+     * 全程 AI 教练：开启后，练完可以一键让教练复盘，并能直接改动计划。
+     *
+     * 默认关。不开的时候 App 就是「练 + 偶尔问一句」，不会因为装了 AI 功能就偷偷花 token。
+     */
+    val autoCoach: Boolean = false,
 )
 
 /**

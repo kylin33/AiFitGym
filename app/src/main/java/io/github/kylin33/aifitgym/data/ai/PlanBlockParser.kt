@@ -19,6 +19,13 @@ data class AiPlanJson(
     val category: String = "",
     /** 教练为什么排这套，一句话；展示在卡片顶部。 */
     val reason: String = "",
+    /**
+     * 只有复盘模式的 `json_plan_update` 会填：要改哪一套计划（按名字匹配）。
+     *
+     * 空串表示「新建一套」—— 聊天里让教练排计划时都是空串，
+     * 所以这个字段不能用来判断块类型，块类型看围栏标签。
+     */
+    val targetRoutine: String = "",
     val items: List<AiPlanItemJson> = emptyList(),
 )
 
@@ -77,10 +84,19 @@ object PlanBlockParser {
         coerceInputValues = true
     }
 
-    data class Split(val text: String, val blocks: List<String>)
+    /**
+     * [blocks] 是「新建计划」块（`json_routine`），[updates] 是「改现有计划」块
+     * （`json_plan_update`）。两者都从正文里剥掉，用户看到的永远只有教练的话。
+     */
+    data class Split(
+        val text: String,
+        val blocks: List<String>,
+        val updates: List<String> = emptyList(),
+    )
 
     fun split(raw: String): Split {
         val blocks = mutableListOf<String>()
+        val updates = mutableListOf<String>()
         val shown = StringBuilder()
         var cursor = 0
 
@@ -105,7 +121,12 @@ object PlanBlockParser {
             }
             val content = raw.substring(lineEnd + 1, close)
             val isJson = tag.isEmpty() || tag.startsWith("json")
-            if (isJson && looksLikePlan(content)) {
+            // 先判 update：它同样含 items/exerciseId，两个条件会同时命中
+            val isUpdate = isJson && (tag.contains("update") || content.contains("\"targetRoutine\""))
+            if (isUpdate) {
+                shown.append(raw, cursor, start)
+                updates += content
+            } else if (isJson && looksLikePlan(content)) {
                 // 围栏之前的正文要先补上，否则「先说一句再给计划」的回复会丢掉前半段
                 shown.append(raw, cursor, start)
                 blocks += content
@@ -116,7 +137,7 @@ object PlanBlockParser {
             cursor = close + 3
         }
 
-        return Split(text = shown.toString().trim(), blocks = blocks)
+        return Split(text = shown.toString().trim(), blocks = blocks, updates = updates)
     }
 
     fun parse(block: String): AiPlanJson? =

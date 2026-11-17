@@ -91,9 +91,18 @@ class CoachContextBuilder(
         sb.append("｜每周 ").append(profile.daysPerWeek).append(" 练")
         sb.append("｜单次约 ").append(profile.sessionMinutes).append(" 分钟")
         sb.append("｜水平 ").append(profile.level)
+        if (profile.trainingDays.isNotEmpty()) {
+            sb.append("｜能练 ").append(profile.trainingDays.joinToString("/") { weekLabel(it) })
+        } else {
+            sb.append("｜没指定具体哪几天")
+        }
         sb.append('\n')
+        // 伤病单独一行并且放最前面：它是提示词里的红线，混在器械备注里会被漏掉
+        if (profile.injuries.isNotBlank()) {
+            sb.append("【伤病 / 疼痛】").append(profile.injuries.trim()).append('\n')
+        }
         if (profile.notes.isNotBlank()) {
-            sb.append("【限制 / 自述】").append(profile.notes.trim()).append('\n')
+            sb.append("【器械 / 作息】").append(profile.notes.trim()).append('\n')
         }
 
         // 流派进度：只写有数据的，6 条全写上占地方
@@ -162,6 +171,16 @@ class CoachContextBuilder(
         }
 
         return sb.toString().trimEnd()
+    }
+
+    private fun weekLabel(day: Int): String = when (day) {
+        1 -> "周一"
+        2 -> "周二"
+        3 -> "周三"
+        4 -> "周四"
+        5 -> "周五"
+        6 -> "周六"
+        else -> "周日"
     }
 
     /** 摘要里的动作名。优先主干动作表，其次直接查库比较贵，退化成 id。 */

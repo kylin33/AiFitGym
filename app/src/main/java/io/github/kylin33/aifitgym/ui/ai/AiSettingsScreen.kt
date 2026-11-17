@@ -3,6 +3,8 @@ package io.github.kylin33.aifitgym.ui.ai
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,7 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -30,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -75,6 +80,9 @@ fun AiSettingsScreen(
     onDaysChange: (Int) -> Unit,
     onMinutesChange: (Int) -> Unit,
     onNotesChange: (String) -> Unit,
+    onInjuriesChange: (String) -> Unit,
+    onToggleTrainingDay: (Int) -> Unit,
+    onAutoCoachChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val endpoint = state.preferences.endpoint
@@ -82,6 +90,8 @@ fun AiSettingsScreen(
 
     var keyDraft by remember { mutableStateOf("") }
     var keyVisible by remember { mutableStateOf(false) }
+    // 开启全程教练前先弹一次说明：计划交给 AI、会花 token，这两件事必须点之前就知道
+    var showAutoCoachConfirm by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -112,7 +122,7 @@ fun AiSettingsScreen(
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "任意 OpenAI 兼容服务都能用：官方 API、中转站、本地 Ollama。" +
-                    "只有你问问题时才会把训练数据发给这个地址，App 本身不上传任何东西。",
+                    "只有你问问题、或点「让教练复盘」时才会把训练数据发给这个地址，App 本身不上传任何东西。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -344,17 +354,107 @@ fun AiSettingsScreen(
             }
         }
 
+        item(key = "training_days") {
+            Spacer(Modifier.height(12.dp))
+            FieldLabel("哪几天能练（可不选）")
+            TrainingDayChips(
+                selected = profile.trainingDays,
+                onToggle = onToggleTrainingDay,
+            )
+            Text(
+                text = "选了具体日子，AI 才能安排隔天练还是连着练；不选就只按每周次数算。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+            )
+        }
+
+        item(key = "injuries") {
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = profile.injuries,
+                onValueChange = onInjuriesChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("伤病 / 疼的部位") },
+                placeholder = { Text("右肩有旧伤，深蹲时膝盖会响") },
+                minLines = 1,
+                maxLines = 3,
+            )
+            Text(
+                text = "这条会作为红线：涉及疼痛时教练会先让你停练，而不是让你再坚持一组。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+            )
+        }
+
         item(key = "notes") {
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = profile.notes,
                 onValueChange = onNotesChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("伤病、器械、作息") },
-                placeholder = { Text("右肩有点旧伤，家里只有单杠和瑜伽垫") },
+                label = { Text("器械、作息") },
+                placeholder = { Text("家里只有单杠和瑜伽垫，晚上十点后不方便练") },
                 minLines = 2,
                 maxLines = 4,
             )
+        }
+
+        item(key = "auto_coach_label") { SectionLabel("全程 AI 教练") }
+        item(key = "auto_coach") {
+            SurfaceCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "让 AI 管理我的计划",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = if (state.preferences.autoCoach) {
+                                "已开启 · 练完结算页会出现「让教练复盘」"
+                            } else {
+                                "练完让教练看一次成绩，并调整下次的计划"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = state.preferences.autoCoach,
+                        onCheckedChange = { checked ->
+                            if (checked) showAutoCoachConfirm = true else onAutoCoachChange(false)
+                        },
+                        enabled = state.ready,
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "开启后：计划由 AI 根据你的实际完成度调整，练完可以给它一句反馈" +
+                        "（累不累、哪里不舒服），它会改动作、改组次，或者加一次别的训练。" +
+                        "改动会先列出清单，你点「应用」才生效。\n" +
+                        "代价：每次复盘约 2~3k token。DeepSeek 不到一分钱，GPT-4o 这类要贵二十倍；" +
+                        "不点复盘就不会产生费用。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!state.ready) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "先把上面的 Key 填好，这个开关才能打开。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
 
         item(key = "footer") {
@@ -374,6 +474,79 @@ fun AiSettingsScreen(
                 )
             }
         }
+    }
+
+    if (showAutoCoachConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAutoCoachConfirm = false },
+            title = { Text("把计划交给 AI 管理？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "练完之后，结算页会出现「让教练复盘」。你写一句感受" +
+                            "（累不累、哪里不舒服、时间够不够），教练会给出调整建议 —— " +
+                            "改动作、改组次，或者加一次别的训练。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = "它不会偷偷改：建议先以清单形式给你看，点「应用」才写进计划；" +
+                            "不想用就点「不用了」，计划一个字都不动。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = "要花钱：每次复盘会把本次每组的成绩和你的反馈发给你配置的服务商，" +
+                            "约 2~3k token。不点复盘就不消耗。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onAutoCoachChange(true)
+                        showAutoCoachConfirm = false
+                    },
+                ) { Text("开启") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoCoachConfirm = false }) { Text("先不用") }
+            },
+        )
+    }
+}
+
+/** 周一到周日七个可多选的圆角小按钮。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TrainingDayChips(selected: List<Int>, onToggle: (Int) -> Unit) {
+    val labels = listOf("一", "二", "三", "四", "五", "六", "日")
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        labels.forEachIndexed { index, label ->
+            val day = index + 1
+            FilterChip(
+                selected = day in selected,
+                onClick = { onToggle(day) },
+                label = { Text("周$label") },
+            )
+        }
+    }
+}
+
+/** 设置页里那种「一块浅色卡片」：多处复用，别每个 item 各写一遍圆角背景。 */
+@Composable
+private fun SurfaceCard(content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(14.dp),
+    ) {
+        Column { content() }
     }
 }
 

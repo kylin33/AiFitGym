@@ -80,6 +80,8 @@ fun ActiveWorkoutScreen(
     onDismissPromotions: () -> Unit,
     onSwapPromoted: () -> Unit,
     onExit: () -> Unit,
+    /** 非空时结算页给一个「让教练复盘」入口；把关的是调用方（开关 + Key 都要就绪）。 */
+    onReview: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var showExitDialog by remember { mutableStateOf(false) }
@@ -121,6 +123,7 @@ fun ActiveWorkoutScreen(
             SessionPhase.COMPLETED -> WorkoutSummary(
                 state = state,
                 onExit = onExit,
+                onReview = onReview,
             )
 
             else -> SessionBody(
@@ -570,7 +573,11 @@ private fun RestPanel(
 }
 
 @Composable
-private fun WorkoutSummary(state: WorkoutSessionState, onExit: () -> Unit) {
+private fun WorkoutSummary(
+    state: WorkoutSessionState,
+    onExit: () -> Unit,
+    onReview: (() -> Unit)? = null,
+) {
     val taxonomy = rememberMuscleTaxonomy()
 
     // 结算热力图按「实际完成的动作和组数」算，切过平替的话算的是平替动作
@@ -755,6 +762,27 @@ private fun WorkoutSummary(state: WorkoutSessionState, onExit: () -> Unit) {
                 text = note,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        if (onReview != null && state.completedSets > 0) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onReview,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Text("让教练复盘这次训练", fontWeight = FontWeight.Medium)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "会把这次的成绩发给你配置的 AI，约 2~3k token",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
