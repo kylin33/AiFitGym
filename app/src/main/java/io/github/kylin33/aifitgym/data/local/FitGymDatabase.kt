@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
  *  - v6 **技能树模型重做**：不再有节点表。48 个主干动作直接在 `exercises` 上用
  *    `branch` + `skillLevel` 标记，条件（组数/目标值/口径）也存在动作行上；
  *    进度收成 `branch_progress` 六行（当前阶 + 经验）。见 [MIGRATION_5_6]。
+ *  - v7 计划条目加 `targetRir`（目标强度），老计划为 null 表示「没规定」
  */
 @Database(
     entities = [
@@ -38,7 +39,7 @@ import kotlinx.coroutines.launch
         BranchProgressEntity::class,
         AppMetaEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(
@@ -90,7 +91,7 @@ abstract class FitGymDatabase : RoomDatabase() {
 
             database = Room.databaseBuilder(appContext, FitGymDatabase::class.java, NAME)
                 .addCallback(bootstrap)
-                .addMigrations(MIGRATION_5_6)
+                .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
                 // 动作库是 assets 里的可再生数据，改结构时直接重建比写迁移划算；
                 // v5 之前的库进来会走这条（训练历史会丢，开发期可接受）
                 .fallbackToDestructiveMigration(dropAllTables = true)
@@ -205,6 +206,18 @@ abstract class FitGymDatabase : RoomDatabase() {
                 "cardio" -> "HIIT"
                 "endurance" -> "CARDIO"
                 else -> "PUSH"
+            }
+        }
+        /**
+         * v6 → v7：计划条目加一列 `targetRir`。
+         *
+         * 只加一列且允许为空，所以原地 ALTER 就够，不用像上一个大版本那样重建表：
+         * 老计划的 RIR 是 null（「没规定」），训练页不显示，行为跟升级前一模一样。
+         * 新排的计划才会填上教练给的目标强度。
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `routine_exercises` ADD COLUMN `targetRir` INTEGER")
             }
         }
     }

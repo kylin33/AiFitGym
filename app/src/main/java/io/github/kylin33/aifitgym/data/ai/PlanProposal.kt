@@ -61,11 +61,16 @@ object PlanDiff {
                 result += ProposalChange(
                     kind = ProposalChangeKind.ADD,
                     title = item.exercise.name,
-                    detail = "新增 · ${targetText(item.sets, item.reps, item.durationSec)}",
+                    detail = "新增 · ${targetText(item.sets, item.reps, item.durationSec, item.rir)}",
                 )
             } else {
-                val from = targetText(before.targetSets, before.targetReps, before.targetDurationSec)
-                val to = targetText(item.sets, item.reps, item.durationSec)
+                val from = targetText(
+                    before.targetSets,
+                    before.targetReps,
+                    before.targetDurationSec,
+                    before.targetRir,
+                )
+                val to = targetText(item.sets, item.reps, item.durationSec, item.rir)
                 val kind = if (from == to && before.restDurationSec == item.restSec) {
                     ProposalChangeKind.KEEP
                 } else {
@@ -98,13 +103,19 @@ object PlanDiff {
         return result
     }
 
-    /** 3 组 × 12 次 / 3 组 × 45 秒。 */
-    fun targetText(sets: Int, reps: Int?, durationSec: Int?): String {
+    /**
+     * 「3 组 × 12 次 · 留 2 次余力」/「3 组 × 45 秒」。
+     *
+     * RIR 也是目标的一部分：同样是 3×12，力竭做和留 2 次做差着 20% 的量，
+     * 只对比组次会把「强度上调」显示成「没改」。
+     */
+    fun targetText(sets: Int, reps: Int?, durationSec: Int?, rir: Int? = null): String {
         val unit = when {
             durationSec != null && durationSec > 0 -> "${durationSec} 秒"
             reps != null && reps > 0 -> "$reps 次"
             else -> "按达标次数"
         }
-        return "$sets 组 × $unit"
+        val base = "$sets 组 × $unit"
+        return if (rir == null) base else "$base · ${RirPolicy.describe(rir)}"
     }
 }

@@ -649,6 +649,7 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
                         reps = it.item.targetReps,
                         seconds = it.item.targetDurationSec,
                         restSeconds = it.restSeconds,
+                        rir = it.item.targetRir,
                     )
                 },
                 logs = snapshot.logs.map {

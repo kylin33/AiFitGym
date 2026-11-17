@@ -60,8 +60,15 @@ class CoachRepository(
         }
 
         val context = contextBuilder.build(state.preferences)
+        // 专项规则按这一轮的话选：聊跑步才加载跑步，不聊就不花那几百字
+        val modules = TrainingModuleSelector.pick(history.lastOrNull { it.role == "user" }?.content.orEmpty())
         val messages = buildList {
-            add(OpenAiClient.ChatMessage("system", CoachPrompts.system(context.poolText, context.poolSize)))
+            add(
+                OpenAiClient.ChatMessage(
+                    "system",
+                    CoachPrompts.system(context.poolText, context.poolSize, modules = modules),
+                ),
+            )
             add(OpenAiClient.ChatMessage("system", CoachPrompts.context(context.snapshot)))
             addAll(history.takeLast(MAX_HISTORY))
         }
@@ -74,7 +81,7 @@ class CoachRepository(
         )
 
         val split = PlanBlockParser.split(raw)
-        val plan = split.blocks.firstNotNullOfOrNull { resolve(it) }
+        val plan = resolveDraft(split, rosterOrEmpty())?.guarded(context, state.preferences)
         // 有模型只吐计划块、不写正文，这种情况给一句过渡话，别让气泡空着
         val text = split.text.ifBlank {
             if (plan != null) "计划排好了，你看看合不合适。" else "（这次没有输出内容，再问一次试试）"
@@ -112,6 +119,8 @@ class CoachRepository(
         val names = exerciseDao.findByIds(ids).associate { it.id to it.name }
 
         val context = contextBuilder.build(state.preferences)
+        // 复盘的专项从「计划名 + 他的自我感受」猜：练的是「有氧 + 核心」就该带上核心那套规则
+        val modules = TrainingModuleSelector.pick("${routine?.name.orEmpty()} $feedback")
         val messages = listOf(
             OpenAiClient.ChatMessage(
                 "system",
@@ -120,6 +129,7 @@ class CoachRepository(
                     poolSize = context.poolSize,
                     review = true,
                     routineNames = routines.map { it.name }.take(MAX_ROUTINE_NAMES),
+                    modules = modules,
                 ),
             ),
             OpenAiClient.ChatMessage("system", CoachPrompts.context(context.snapshot)),
@@ -135,10 +145,11 @@ class CoachRepository(
 
         val split = PlanBlockParser.split(raw)
         val proposal = split.updates.firstNotNullOfOrNull { resolveUpdate(it, routines, names) }
+            ?.let { it.copy(draft = it.draft.guarded(context, state.preferences)) }
             ?: split.blocks.firstNotNullOfOrNull { resolve(it) }?.let { draft ->
                 // 复盘模式下吐了普通计划块：当成「新建一套」，全条都是新增
                 PlanProposal(
-                    draft = draft,
+                    draft = draft.guarded(context, state.preferences),
                     target = null,
                     targetName = "",
                     changes = PlanDiff.compare(emptyList(), draft) { id -> names[id] ?: id },
@@ -154,9 +165,51 @@ class CoachRepository(
         return ReviewAnswer(text = text, raw = raw, proposal = proposal)
     }
 
-    /** 恢复历史消息时用：从一段原始回复里重新解析出计划。 */
+    /**
+     * 恢复历史消息时用：从一段原始回复里重新解析出计划。
+     *
+     * 也认 `json_plan_update` —— 聊天里改过计划的那条消息，重开 App 后
+     * 卡片上还得是「更新某某计划」，不能退化成一张只能看的图。
+     */
     suspend fun resolvePlan(raw: String): PlanDraft? =
-        PlanBlockParser.split(raw).blocks.firstNotNullOfOrNull { resolve(it) }
+        resolveDraft(PlanBlockParser.split(raw), rosterOrEmpty())
+
+    /**
+     * 从一份回复里取出「要落地的计划」。
+     *
+     * 先看改现有计划的块，再看新建的块：模型经常两样都写（先给完整列表再补一句
+     * 改动），改动比新建更接近它的真实意图。
+     */
+    private suspend fun resolveDraft(
+        split: PlanBlockParser.Split,
+        routines: List<RoutineEntity>,
+    ): PlanDraft? {
+        val update = split.updates.firstNotNullOfOrNull { resolveUpdate(it, routines, emptyMap()) }
+        if (update != null) {
+            // resolveUpdate 已经按名字匹配过，把匹配结果写回草稿，导入时才能覆盖同一套
+            return update.draft.copy(
+                targetRoutineName = update.target?.name ?: update.targetName,
+            )
+        }
+        return split.blocks.firstNotNullOfOrNull { resolve(it) }
+    }
+
+    /**
+     * 应用前的体检。
+     *
+     * 只在真正拿到最新简报的路径上做（问一句 / 复盘）：历史回填时没有本轮统计，
+     * 为了一条警告再查一遍库不值得，卡片上少一行提示比多等一秒好。
+     */
+    private fun PlanDraft.guarded(context: CoachContext, preferences: AiPreferences): PlanDraft {
+        val advice = VolumePolicy.advise(context.stats, isBeginner())
+        val warnings = PlanGuard.check(
+            draft = this,
+            limitations = preferences.profile.limitations,
+            advice = advice,
+            lastTrainedByBranch = context.stats.lastTrainedByBranch,
+        )
+        return if (warnings.isEmpty()) this else copy(warnings = warnings)
+    }
 
     /** 计划块 → 可执行草稿。 */
     private suspend fun resolve(block: String): PlanDraft? {
@@ -171,7 +224,7 @@ class CoachRepository(
      * 一条对不上就整个作废更糟 —— 用户会以为 AI 完全不会排计划；
      * 但把编出来的动作留在计划里更糟，点开始会发现没有动图、肌群也算不出来。
      */
-    private suspend fun draftOf(parsed: AiPlanJson): PlanDraft? {
+    private suspend fun draftOf(parsed: AiPlanJson, targetRoutineName: String = ""): PlanDraft? {
         val candidates = parsed.items.take(MAX_ITEMS)
         if (candidates.isEmpty()) return null
 
@@ -182,6 +235,10 @@ class CoachRepository(
             .getOrDefault(emptyList())
             .associateBy { it.id }
 
+        val category = PlanBlockParser.categoryOf(parsed.category)
+        val beginner = isBeginner()
+        val maxSets = if (beginner) MAX_SETS_BEGINNER else MAX_SETS
+
         var dropped = 0
         val items = candidates.mapNotNull { item ->
             val exercise = found[item.exerciseId.trim()]
@@ -190,8 +247,10 @@ class CoachRepository(
                 return@mapNotNull null
             }
 
-            val sets = item.sets.coerceIn(1, 6)
-            val rest = (item.restSec ?: DEFAULT_REST).coerceIn(15, 180)
+            // 动作类型决定休息与默认强度，都在规则层算，提示词说错了也纠正得回来
+            val cls = ExerciseClass.of(exercise)
+            val sets = item.sets.coerceIn(1, maxSets)
+            val rest = RestPolicy.coerce(item.restSec, cls, category)
             val duration = item.durationSec ?: 0
             val reps = item.reps ?: 0
 
@@ -214,6 +273,7 @@ class CoachRepository(
                 durationSec = finalDuration,
                 restSec = rest,
                 note = item.note?.trim()?.take(60)?.ifBlank { null },
+                rir = RirPolicy.coerce(item.rir, cls, beginner),
             )
         }
 
@@ -226,19 +286,29 @@ class CoachRepository(
             name = name,
             description = description,
             reason = parsed.reason.trim().take(120),
-            category = PlanBlockParser.categoryOf(parsed.category),
+            category = category,
             items = items,
             dropped = dropped,
+            targetRoutineName = targetRoutineName.trim().ifBlank { parsed.targetRoutine.trim() },
         )
     }
+
+    /** 档案里自评「新手」就按新手兜底；空白或「有基础」都当成能上常规量。 */
+    private fun isBeginner(): Boolean = settings.state.value.preferences.profile.isBeginner
 
     /**
      * 把草稿写成正式计划。
      *
-     * 走 [RoutineDao.save]，它会统一重排 orderIndex 并处理自增主键，
-     * 所以这里把 routineId 和 id 都留 0。
+     * 草稿带了 [PlanDraft.targetRoutineName] 就**改那一套**，否则新建 ——
+     * 不然「给推日加一组」这种请求会在计划列表里堆出一排「推日」。
+     * 改现有计划时按名字精确匹配：匹配不上宁可新建，也不要猜着改到别人身上。
      */
     suspend fun importPlan(draft: PlanDraft): Long {
+        val target = draft.targetRoutineName.trim()
+            .takeIf { it.isNotEmpty() }
+            ?.let { name -> rosterOrEmpty().firstOrNull { it.name.trim() == name } }
+        if (target != null) return saveInto(target, draft)
+
         val routine = RoutineEntity(
             name = draft.name,
             description = draft.description,
@@ -253,9 +323,37 @@ class CoachRepository(
                 targetReps = item.reps,
                 targetDurationSec = item.durationSec,
                 restDurationSec = item.restSec,
+                targetRir = item.rir,
             )
         }
         return routineDao.save(routine, items)
+    }
+
+    /**
+     * 把一份草稿整份写进已有计划（动作列表整体替换）。
+     *
+     * 平替动作按 exerciseId 沿用旧的：那是用户自己配的退阶，不该因为 AI 改一次计划就丢。
+     */
+    private suspend fun saveInto(target: RoutineEntity, draft: PlanDraft): Long {
+        val existing = routineDao.findItems(target.routineId).associateBy { it.exerciseId }
+        val items = draft.items.map { item ->
+            RoutineExerciseEntity(
+                routineId = target.routineId,
+                exerciseId = item.exercise.id,
+                orderIndex = 0,
+                targetSets = item.sets,
+                targetReps = item.reps,
+                targetDurationSec = item.durationSec,
+                restDurationSec = item.restSec,
+                targetRir = item.rir,
+                backupExerciseId = existing[item.exercise.id]?.backupExerciseId,
+            )
+        }
+        // 计划名保持用户原来那个：改名会让「按名字找计划」这条链路在下次复盘时错位
+        val updated = target.copy(
+            description = draft.description.ifBlank { target.description },
+        )
+        return routineDao.save(updated, items)
     }
 
     suspend fun testConnection(): Result<String> {
@@ -309,7 +407,7 @@ class CoachRepository(
         }
 
         return PlanProposal(
-            draft = draft,
+            draft = draft.copy(targetRoutineName = target?.name ?: wanted),
             target = target,
             targetName = wanted,
             changes = PlanDiff.compare(old, draft) { id ->
@@ -321,31 +419,12 @@ class CoachRepository(
     /**
      * 应用一份改动建议。
      *
-     * 改现有计划走 [RoutineDao.save]：它会先删条目再按新下标重写，
-     * 所以「换顺序、减动作、加组数」都是同一套动作。平替动作（backupExerciseId）
-     * 按 exerciseId 沿用旧的 —— 那是用户自己配的退阶，不该因为一次复盘就丢。
+     * 和 [importPlan] 走同一条写入路径（[saveInto]）：复盘改计划、聊天里改计划、
+     * 导入一份新计划，落到库里都是「一套计划 + 整份动作列表」。
      */
     suspend fun applyProposal(proposal: PlanProposal): Long {
         val target = proposal.target ?: return importPlan(proposal.draft)
-        val existing = routineDao.findItems(target.routineId).associateBy { it.exerciseId }
-
-        val items = proposal.draft.items.map { item ->
-            RoutineExerciseEntity(
-                routineId = target.routineId,
-                exerciseId = item.exercise.id,
-                orderIndex = 0,
-                targetSets = item.sets,
-                targetReps = item.reps,
-                targetDurationSec = item.durationSec,
-                restDurationSec = item.restSec,
-                backupExerciseId = existing[item.exercise.id]?.backupExerciseId,
-            )
-        }
-        // 计划名保持用户原来那个：改名会让「按名字找计划」这条链路在下次复盘时错位
-        val updated = target.copy(
-            description = proposal.draft.description.ifBlank { target.description },
-        )
-        return routineDao.save(updated, items)
+        return saveInto(target, proposal.draft)
     }
 
     /** 本次训练的实际成绩 vs 计划目标，拼成一条 user 消息。 */
@@ -373,6 +452,7 @@ class CoachRepository(
                 sb.append("- ").append(names[target.exerciseId] ?: target.exerciseId)
                 sb.append(" 目标 ")
                     .append(PlanDiff.targetText(target.targetSets, target.targetReps, target.targetDurationSec))
+                target.targetRir?.let { sb.append("（").append(RirPolicy.describe(it)).append("）") }
                 if (rows.isEmpty()) {
                     sb.append(" → 没做\n")
                 } else {
@@ -415,7 +495,10 @@ class CoachRepository(
         /** 一套计划最多 8 条，留 2 条冗余，多的直接砍。 */
         const val MAX_ITEMS = 10
 
-        const val DEFAULT_REST = 60
+        /** 单条动作的组数上限；新手压到 [MAX_SETS_BEGINNER]，先建动作质量。 */
+        const val MAX_SETS = 6
+        const val MAX_SETS_BEGINNER = 5
+
         const val DEFAULT_REPS = 10
         const val DEFAULT_TIMED_SEC = 30
     }

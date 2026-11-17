@@ -40,6 +40,8 @@ data class CheckpointEntry(
     /** 计时动作的目标秒数；计次动作为 null。 */
     val seconds: Int? = null,
     val restSeconds: Int = 60,
+    /** 目标 RIR；老检查点没有这个字段，读出来是 null（不显示强度提示）。 */
+    val rir: Int? = null,
 )
 
 /**

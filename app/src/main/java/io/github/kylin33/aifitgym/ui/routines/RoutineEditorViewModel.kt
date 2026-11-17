@@ -23,6 +23,11 @@ data class EditorItem(
     val reps: Int,
     val durationSec: Int,
     val restSec: Int,
+    /**
+     * 教练给的目标强度。编排页暂时没有编辑入口，但要**原样带进保存** ——
+     * 否则用户只是改一下组数，AI 定好的「留 2 次余力」就没了。
+     */
+    val rir: Int? = null,
     val backupId: String? = null,
     val backupName: String? = null,
 ) {
@@ -108,6 +113,7 @@ class RoutineEditorViewModel(private val container: AppContainer) : ViewModel() 
                     reps = item.targetReps ?: 10,
                     durationSec = item.targetDurationSec ?: 30,
                     restSec = item.restDurationSec,
+                    rir = item.targetRir,
                     backupId = backup?.id,
                     backupName = backup?.name,
                 )
@@ -245,6 +251,7 @@ class RoutineEditorViewModel(private val container: AppContainer) : ViewModel() 
                     targetReps = if (item.timed) null else item.reps,
                     targetDurationSec = if (item.timed) item.durationSec else null,
                     restDurationSec = item.restSec,
+                    targetRir = item.rir,
                     backupExerciseId = item.backupId,
                 )
             }

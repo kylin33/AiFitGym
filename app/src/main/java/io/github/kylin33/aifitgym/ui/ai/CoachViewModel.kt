@@ -198,7 +198,13 @@ class CoachViewModel(container: AppContainer) : ViewModel() {
                 )
             }
             _message.value = result.fold(
-                onSuccess = { "「${draft.name}」已加入我的计划" },
+                onSuccess = {
+                    if (draft.targetRoutineName.isNotBlank()) {
+                        "「${draft.targetRoutineName}」已更新"
+                    } else {
+                        "「${draft.name}」已加入我的计划"
+                    }
+                },
                 onFailure = { "导入失败：${it.message ?: "数据库写入被中断"}" },
             )
         }

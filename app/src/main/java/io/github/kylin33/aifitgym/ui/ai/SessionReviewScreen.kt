@@ -289,6 +289,16 @@ private fun ProposalCard(
             )
         }
 
+        // 程序体检：伤病部位、训练量、恢复 —— 模型漏了也会在这里露出来
+        proposal.draft.warnings.forEach { warning ->
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "⚠ $warning",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
         Spacer(Modifier.height(10.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
 

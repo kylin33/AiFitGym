@@ -173,6 +173,7 @@ class AppContainer(context: Context) {
                 exerciseDao = database.exerciseDao(),
                 sessionDao = database.workoutSessionDao(),
                 progressDao = database.branchProgressDao(),
+                routineDao = database.routineDao(),
                 statsBuilder = TrainingStatsBuilder(
                     sessionDao = database.workoutSessionDao(),
                     exerciseDao = database.exerciseDao(),

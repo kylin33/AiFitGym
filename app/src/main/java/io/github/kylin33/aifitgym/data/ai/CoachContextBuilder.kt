@@ -3,6 +3,7 @@ package io.github.kylin33.aifitgym.data.ai
 import io.github.kylin33.aifitgym.data.local.BranchProgressDao
 import io.github.kylin33.aifitgym.data.local.ExerciseDao
 import io.github.kylin33.aifitgym.data.local.ExerciseEntity
+import io.github.kylin33.aifitgym.data.local.RoutineDao
 import io.github.kylin33.aifitgym.data.local.WorkoutSessionDao
 import io.github.kylin33.aifitgym.data.skill.SkillBranch
 import java.text.SimpleDateFormat
@@ -46,6 +47,7 @@ class CoachContextBuilder(
     private val exerciseDao: ExerciseDao,
     private val sessionDao: WorkoutSessionDao,
     private val progressDao: BranchProgressDao,
+    private val routineDao: RoutineDao,
     private val statsBuilder: TrainingStatsBuilder,
 ) {
 
@@ -74,11 +76,11 @@ class CoachContextBuilder(
             .distinctBy { it.id }
             .take(MAX_POOL)
 
-        // 统计与简报分开算：统计只依赖 sessionDao，简报还要动作库和进度
+        // 统计要先算出来：简报里的「建议训练量」和「各流派最近一次」都依赖它
         val stats = statsBuilder.build(now)
 
         return CoachContext(
-            snapshot = buildSnapshot(preferences, progress, bosses, since30) +
+            snapshot = buildSnapshot(preferences, progress, bosses, since30, stats) +
                 "\n\n" + stats.toPromptText(),
             poolText = pool.joinToString("\n") { it.toPoolLine() },
             poolSize = pool.size,
@@ -93,6 +95,7 @@ class CoachContextBuilder(
         progress: List<io.github.kylin33.aifitgym.data.local.BranchProgressEntity>,
         bosses: List<ExerciseEntity>,
         since30: Long,
+        stats: TrainingStats,
     ): String {
         val profile = preferences.profile
         val sb = StringBuilder()
@@ -140,6 +143,10 @@ class CoachContextBuilder(
                 .append(" 还没填，上面的值是默认值不是他说的\n")
         }
 
+        // 训练量建议由程序算：档案说「每周 3 次」不等于他最近真的练了 3 次
+        val advice = VolumePolicy.advise(stats, profile.isBeginner)
+        sb.append("【建议训练量】").append(advice.toPromptLine()).append('\n')
+
         // 流派进度：只写有数据的，6 条全写上占地方
         if (progress.isNotEmpty()) {
             val text = SkillBranch.entries.mapNotNull { branch ->
@@ -151,6 +158,9 @@ class CoachContextBuilder(
             sb.append("｜已通关主干 ").append(mastered).append("/").append(bosses.size)
             sb.append('\n')
         }
+
+        // 现有计划：不给它看，它每次都会「重新设计一套」
+        appendRoutines(sb)
 
         // 最近训练：5 场、每场最多 5 个动作
         val sessions = runCatching { sessionDao.recentFinishedSessions(5) }.getOrDefault(emptyList())
@@ -209,6 +219,53 @@ class CoachContextBuilder(
     }
 
     /**
+     * 【现有计划】。
+     *
+     * 这一节是为了「在原有计划上调整」才加的：只给计划名不给内容，模型还是会从头
+     * 再设计一套（它不知道用户现在练的到底是哪几个动作、几组几次）。
+     * 给名字、动作、组次、休息、RIR 就够它做「加一组」「换个动作」这种判断了。
+     */
+    private suspend fun appendRoutines(sb: StringBuilder) {
+        val routines = runCatching { routineDao.activeRoutines() }.getOrDefault(emptyList())
+        if (routines.isEmpty()) {
+            sb.append("【现有计划】还没有任何计划\n")
+            return
+        }
+
+        val picked = routines.take(MAX_ROUTINES)
+        val items = runCatching { routineDao.allItemsForBackup() }
+            .getOrDefault(emptyList())
+            .groupBy { it.routineId }
+        val ids = picked.flatMap { routine -> items[routine.routineId].orEmpty().map { it.exerciseId } }
+            .distinct()
+        val names = runCatching { exerciseDao.findByIds(ids) }
+            .getOrDefault(emptyList())
+            .associate { it.id to it.name }
+
+        sb.append("【现有计划】要改其中一套就用 json_plan_update，targetRoutine 原样复制计划名\n")
+        picked.forEach { routine ->
+            sb.append("· ").append(routine.name).append("｜").append(routine.category.label).append('\n')
+            val line = items[routine.routineId].orEmpty()
+                .take(MAX_ITEMS_PER_ROUTINE)
+                .joinToString(" · ") { row ->
+                    buildString {
+                        append(names[row.exerciseId] ?: row.exerciseId)
+                        append(' ').append(row.targetSets).append('×')
+                        val seconds = row.targetDurationSec ?: 0
+                        if (seconds > 0) {
+                            append(seconds).append(" 秒")
+                        } else {
+                            append(row.targetReps ?: DEFAULT_REPS).append(" 次")
+                        }
+                        append(" 休").append(row.restDurationSec)
+                        row.targetRir?.let { append(" 留").append(it) }
+                    }
+                }
+            if (line.isNotEmpty()) sb.append("  ").append(line).append('\n')
+        }
+    }
+
+    /**
      * 给「有默认值」的项标来源。
      *
      * 不标的话，「水平 新手」会被模型当成用户自述 —— 一个练了三年的人
@@ -234,11 +291,21 @@ class CoachContextBuilder(
 
     private fun ExerciseEntity.toPoolLine(): String {
         val mode = if (unlockType.contains("DURATION")) "计时" else "计次"
-        return "$id|$name|$mode"
+        // 类型与难度也带上：模型据此决定休息多长、RIR 给几、这套排几个高难度动作
+        val cls = ExerciseClass.of(this)
+        return "$id|$name|$mode|${cls.label}|${Difficulty.of(this, cls).label}"
     }
 
     private companion object {
         /** 上限 90 条，约 1.2k token；再多对排计划没有边际收益。 */
         const val MAX_POOL = 90
+
+        /** 现有计划只带最近 3 套：他要练的就是这几套，剩下的纯占位置。 */
+        const val MAX_ROUTINES = 3
+
+        /** 每套最多 6 条 —— 够看出「这套练什么、量多大」，又不至于把简报撑爆。 */
+        const val MAX_ITEMS_PER_ROUTINE = 6
+
+        const val DEFAULT_REPS = 10
     }
 }

@@ -124,6 +124,28 @@ class TrainingStatsTest {
         assertEquals(TrendKind.STABLE, TrainingStatsMath.trendOf(listOf(12, 9, 12, 9)))
     }
 
+    // ------------------------------------------------------------ 恢复
+
+    @Test
+    fun last_trained_days_only_keeps_recent_branches() {
+        val rows = listOf(
+            perf(1, "A", noon - 2 * 3600_000L, sets = 3, reps = 10),
+            perf(2, "B", noon - 3 * day, sets = 3, reps = 10),
+            perf(3, "C", noon - 20 * day, sets = 3, reps = 10),
+        )
+
+        val days = TrainingStatsMath.lastTrainedDays(
+            rows,
+            branchOf = mapOf("A" to "PUSH", "B" to "PULL", "C" to "LEGS"),
+            now = noon,
+        )
+
+        assertEquals(0, days["PUSH"])
+        assertEquals(3, days["PULL"])
+        // 20 天前的不进简报：它跟「今天还能不能练腿」已经没关系了
+        assertFalse("LEGS" in days)
+    }
+
     // ------------------------------------------------------------ 渲染
 
     @Test

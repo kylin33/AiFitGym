@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import io.github.kylin33.aifitgym.data.ai.AiSettingsState
 import io.github.kylin33.aifitgym.data.ai.CoachPrompts
 import io.github.kylin33.aifitgym.data.ai.PlanDraft
+import io.github.kylin33.aifitgym.data.ai.RirPolicy
 import io.github.kylin33.aifitgym.data.anatomy.MuscleScoring
 import io.github.kylin33.aifitgym.ui.components.ExerciseImage
 import io.github.kylin33.aifitgym.ui.components.MuscleHeatmap
@@ -438,14 +439,14 @@ private fun PlanCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "训练计划",
+                text = if (plan.targetRoutineName.isNotBlank()) "计划调整" else "训练计划",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = if (importedRoutineId != null) "已加入" else "AI 生成",
+                text = if (importedRoutineId != null) "已应用" else "AI 生成",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -456,6 +457,13 @@ private fun PlanCard(
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
+        if (plan.targetRoutineName.isNotBlank()) {
+            Text(
+                text = "会整份替换「${plan.targetRoutineName}」的动作列表",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (plan.reason.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Text(
@@ -513,6 +521,7 @@ private fun PlanCard(
                                 item.reps != null -> append(" × ${item.reps} 次")
                             }
                             append(" · 休息 ${item.restSec} 秒")
+                            item.rir?.let { append(" · ${RirPolicy.describe(it)}") }
                             if (!item.note.isNullOrBlank()) append(" · ${item.note}")
                         },
                         style = MaterialTheme.typography.labelSmall,
@@ -531,12 +540,41 @@ private fun PlanCard(
             Spacer(Modifier.height(6.dp))
         }
 
+        // 程序体检出来的问题：伤病部位、训练量超标、同一部位连着练
+        plan.warnings.forEach { warning ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text(
+                    text = "⚠",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = warning,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (plan.warnings.isNotEmpty()) Spacer(Modifier.height(6.dp))
+
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             val id = importedRoutineId
             if (id == null) {
                 Button(onClick = onImport, enabled = !importing) {
-                    Text(if (importing) "正在加入…" else "加入我的计划")
+                    Text(
+                        when {
+                            importing -> "正在写入…"
+                            plan.targetRoutineName.isNotBlank() -> "更新到「${plan.targetRoutineName}」"
+                            else -> "加入我的计划"
+                        },
+                    )
                 }
             } else {
                 Button(onClick = { onOpenRoutine(id) }) { Text("打开计划") }

@@ -101,6 +101,13 @@ data class RoutineExerciseEntity(
     val targetDurationSec: Int? = null,
     /** 组间休息秒数，力量日 90s、HIIT 10~20s。 */
     val restDurationSec: Int = 60,
+    /**
+     * 目标 RIR：一组结束时还应剩几次余力。null = 没规定（计时动作、老计划）。
+     *
+     * 存在计划里而不是只写进提示词，是为了训练页能显示「留 2 次余力」——
+     * 否则用户看到「10 次」还得自己猜是力竭还是留力，教练说过的强度就丢了。
+     */
+    val targetRir: Int? = null,
     /** 做不动时的平替/退阶动作，可为空。 */
     val backupExerciseId: String? = null,
 ) {

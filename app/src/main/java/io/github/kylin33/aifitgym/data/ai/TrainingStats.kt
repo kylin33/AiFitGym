@@ -29,6 +29,13 @@ data class TrainingStats(
     val trends: List<ExerciseTrend> = emptyList(),
     /** 距上次训练几天；null 表示 30 天窗口内一条记录都没有。 */
     val daysSinceLast: Int? = null,
+    /**
+     * 每条力量流派最近一次练是几天前，只含近 14 天练过的。
+     *
+     * 「推了 18 组」和「昨天刚推了 18 组」是两件事：前者是量，后者是「今天不该再推」。
+     * 模型看不出这个区别就会排出「昨天练胸，今天还练胸」。
+     */
+    val lastTrainedByBranch: Map<String, Int> = emptyMap(),
 ) {
     val isEmpty: Boolean get() = last30.totalSets == 0
 
@@ -58,6 +65,13 @@ data class TrainingStats(
         if (trends.isNotEmpty()) {
             sb.append("动作表现（近 30 天每次训练的单场最好成绩，最多 4 次）：\n")
             trends.forEach { sb.append("  · ").append(it.describe()).append('\n') }
+        }
+        if (lastTrainedByBranch.isNotEmpty()) {
+            val text = SkillBranch.entries.mapNotNull { branch ->
+                val days = lastTrainedByBranch[branch.key] ?: return@mapNotNull null
+                "${branch.label} ${if (days == 0) "今天" else "$days 天前"}"
+            }.joinToString(" · ")
+            sb.append("各流派最近一次：").append(text).append('\n')
         }
         sb.append(
             when (val days = daysSinceLast) {
@@ -221,6 +235,24 @@ object TrainingStatsMath {
     }
 
     /**
+     * 每条力量流派最近一次训练是几天前，只留 [withinDays] 天内的。
+     *
+     * 用「距现在多少小时 / 24」而不是自然日相减：这里要的是「昨天还是前天」，
+     * 差几个小时的边界误差无所谓；真正需要自然日的「训练日」用的是 [dayKey]。
+     */
+    fun lastTrainedDays(
+        performances: List<SessionPerformance>,
+        branchOf: Map<String, String>,
+        now: Long,
+        withinDays: Int = 14,
+    ): Map<String, Int> = performances
+        .groupBy { branchOf[it.exerciseId] ?: SkillBranch.CORE.key }
+        .mapValues { (_, rows) ->
+            ((now - rows.maxOf { it.startedAt }) / DAY_MS).toInt().coerceAtLeast(0)
+        }
+        .filterValues { it <= withinDays }
+
+    /**
      * 趋势判定。
      *
      * 刻意保守：**必须连续两次同向变化**才算上升/下降。单次掉下来可能只是
@@ -284,6 +316,7 @@ class TrainingStatsBuilder(
             last30 = TrainingStatsMath.window(performances, branchOf, since30, now, 30),
             trends = buildTrends(performances, nameOf),
             daysSinceLast = ((now - lastDone) / day).toInt().coerceAtLeast(0),
+            lastTrainedByBranch = TrainingStatsMath.lastTrainedDays(performances, branchOf, now),
         )
     }
 

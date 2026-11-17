@@ -38,6 +38,13 @@ data class AiPlanItemJson(
     /** 计时（秒），与 [reps] 二选一。 */
     val durationSec: Int? = null,
     val restSec: Int? = null,
+    /**
+     * 目标强度：一组结束时还应该能再做几次（RIR）。
+     *
+     * 「10 次」不说做到什么程度等于没说 —— 力竭做 10 次和留 3 次做 10 次
+     * 完全不是一个训练。模型给了就采信（夹到 0~5），没给按动作类型补默认值。
+     */
+    val rir: Int? = null,
     /** 教练对这条的一句话嘱咐。 */
     val note: String? = null,
 )
@@ -50,6 +57,8 @@ data class PlanDraftItem(
     val durationSec: Int?,
     val restSec: Int,
     val note: String?,
+    /** 目标 RIR；计时类动作为 null（撑几秒没有「还有几次」这回事）。 */
+    val rir: Int? = null,
 )
 
 /**
@@ -65,6 +74,15 @@ data class PlanDraft(
     val category: RoutineCategory,
     val items: List<PlanDraftItem>,
     val dropped: Int,
+    /**
+     * 要改的是哪套现有计划（按名字）。
+     *
+     * 空串 = 新建。非空时导入会**覆盖**这套计划的动作列表，而不是再建一套同名的 ——
+     * 教练在聊天里说「给推日加一组」，用户点一下就多出一个「推日 2」，那是 bug 不是功能。
+     */
+    val targetRoutineName: String = "",
+    /** 程序侧体检发现的问题（伤病部位、训练量超标），展示在卡片上，不阻止用户应用。 */
+    val warnings: List<String> = emptyList(),
 )
 
 /**

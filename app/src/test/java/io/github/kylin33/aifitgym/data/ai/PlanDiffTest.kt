@@ -110,9 +110,32 @@ class PlanDiffTest {
     }
 
     @Test
+    fun rir_change_alone_counts_as_change() {
+        // 组数次数都没动、只把「留 3 次」改成「留 1 次」，这是实打实的加量
+        val old = listOf(item("A", sets = 3, reps = 10).copy(targetRir = 3))
+        val new = draft(
+            PlanDraftItem(
+                exercise = exercise("A", "俯卧撑"),
+                sets = 3,
+                reps = 10,
+                durationSec = null,
+                restSec = 90,
+                note = null,
+                rir = 1,
+            ),
+        )
+
+        val change = PlanDiff.compare(old, new) { it }.single()
+        assertEquals(ProposalChangeKind.CHANGE, change.kind)
+        assertTrue(change.detail.contains("留 3 次余力"))
+        assertTrue(change.detail.contains("留 1 次余力"))
+    }
+
+    @Test
     fun timed_and_reps_are_formatted_differently() {
         assertEquals("3 组 × 12 次", PlanDiff.targetText(3, 12, null))
         assertEquals("3 组 × 45 秒", PlanDiff.targetText(3, null, 45))
         assertEquals("3 组 × 按达标次数", PlanDiff.targetText(3, null, null))
+        assertEquals("3 组 × 12 次 · 留 2 次余力", PlanDiff.targetText(3, 12, null, 2))
     }
 }

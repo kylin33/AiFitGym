@@ -34,6 +34,9 @@ data class WorkoutEntry(
 
     val restSeconds: Int get() = item.restDurationSec.coerceAtLeast(0)
 
+    /** 教练给的目标强度（一组还剩几次余力）；null 表示这套计划没规定。 */
+    val targetRir: Int? get() = item.targetRir
+
     companion object {
         const val DEFAULT_REPS = 10
         const val DEFAULT_SECONDS = 30
@@ -149,6 +152,7 @@ class WorkoutRepository(
                     targetReps = item.reps,
                     targetDurationSec = item.seconds,
                     restDurationSec = item.restSeconds,
+                    targetRir = item.rir,
                     backupExerciseId = item.backupExerciseId,
                 ),
                 exercise = exercise,

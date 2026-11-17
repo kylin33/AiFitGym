@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.kylin33.aifitgym.data.ai.RirPolicy
 import io.github.kylin33.aifitgym.data.anatomy.MuscleScoring
 import io.github.kylin33.aifitgym.data.repo.PrMetric
 import io.github.kylin33.aifitgym.ui.components.CountdownRing
@@ -487,7 +488,11 @@ private fun RepsPanel(
         }
 
         Text(
-            text = "目标 $targetReps 次 · 第 ${state.setIndex}/${state.current?.targetSets ?: 1} 组",
+            text = buildString {
+                append("目标 $targetReps 次 · 第 ${state.setIndex}/${state.current?.targetSets ?: 1} 组")
+                // 教练说「留 2 次余力」就得让他在组间看得见，否则这句强度要求等于没写
+                state.current?.targetRir?.let { append(" · ${RirPolicy.describe(it)}") }
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )

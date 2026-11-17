@@ -195,6 +195,14 @@ data class AiProfile(
      */
     val confirmed: Set<String> = emptySet(),
 ) {
+    /**
+     * 该不该按新手排。
+     *
+     * 空白和默认值都算新手：宁可少给两组，也不要第一次就把人练废。
+     * 「新手」这个判断同时影响组数上限、默认 RIR 和训练量建议，所以只在这里定义一次。
+     */
+    val isBeginner: Boolean get() = level.isBlank() || level == ProfileDefaults.LEVEL
+
     /** 这项有没有实际内容（只看值，不看是谁填的）。 */
     fun hasValue(field: String): Boolean = when (field) {
         ProfileField.GOAL -> goal.isNotBlank()
