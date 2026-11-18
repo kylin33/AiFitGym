@@ -558,7 +558,7 @@ private fun ClearDataDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
                 )
                 Text(
                     text = "会保留：内置动作库，以及通知权限这类系统设置。" +
-                        "清空后自动恢复 3 套内置模板，等于刚装好 App 的样子。",
+                        "清空后等于刚装好 App 的样子 —— 技能树回到 Lv.1，计划列表是空的，要重新排。",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(

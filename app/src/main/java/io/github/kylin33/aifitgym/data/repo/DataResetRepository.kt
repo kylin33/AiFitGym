@@ -8,7 +8,6 @@ import io.github.kylin33.aifitgym.data.local.ExerciseDao
 import io.github.kylin33.aifitgym.data.local.FitGymDatabase
 import io.github.kylin33.aifitgym.data.local.RoutineDao
 import io.github.kylin33.aifitgym.data.local.WorkoutSessionDao
-import io.github.kylin33.aifitgym.data.seeding.PresetRoutineSeeder
 import io.github.kylin33.aifitgym.data.skill.SkillRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,8 +25,9 @@ import kotlinx.coroutines.withContext
  * 删了下次启动还得从 assets 重灌 2.6 秒，没有任何好处。只把 48 个通关标记清掉。
  *
  * ## 清完要「补回初始态」而不是「留个空壳」
- * 清空后自动重放一次首启逻辑：6 条流派账本补到 Lv.1、3 套内置模板重新灌回。
- * 否则用户面对的是一个连计划都没有的空首页，还得等下次启动才恢复。
+ * 清空后自动重放一次首启逻辑：6 条流派账本补到 Lv.1。
+ * 计划不补 —— 本来就一套都不预置，清空后用户面对的是「还没有计划」的引导页，
+ * 而不是一堆别人排好的动作。
  */
 class DataResetRepository(
     private val db: FitGymDatabase,
@@ -36,7 +36,6 @@ class DataResetRepository(
     private val routineDao: RoutineDao,
     private val sessionDao: WorkoutSessionDao,
     private val progressDao: BranchProgressDao,
-    private val presetSeeder: PresetRoutineSeeder,
     private val skillRepository: SkillRepository,
 ) {
 
@@ -50,8 +49,6 @@ class DataResetRepository(
                 routineDao.clearRoutines()
                 progressDao.clearAll()
                 exerciseDao.clearMastery()
-                // 删掉模板标记，seedIfNeeded 才会认为「还没灌过」
-                appMetaDao.remove(PresetRoutineSeeder.KEY_VERSION)
                 // AI 对话是基于旧训练数据聊出来的，清完数据再留着它只会误导下一位用户；
                 // 模型/密钥属于「设置」不是「数据」，保留（谁都不想重填一次 Key）
                 appMetaDao.remove(AI_CHAT_KEY)
@@ -60,12 +57,11 @@ class DataResetRepository(
                 appMetaDao.remove(CheckpointStore.KEY)
             }
 
-            // 事务外重放首启的那两步：它们本身幂等，正是为这种场合准备的。
+            // 事务外重放首启的那一步：它本身幂等，正是为这种场合准备的。
             // 用内层 runCatching 兜住：补初始态失败不该让「已清空」这个既成事实报成失败
-            // （用户会以为数据还在，其实已经没了）。缺的模板和账本下次启动 bootstrap 会补齐。
+            // （用户会以为数据还在，其实已经没了）。缺的账本下次启动 bootstrap 会补齐。
             runCatching {
                 skillRepository.ensureInitialized()
-                presetSeeder.seedIfNeeded()
             }
             Unit
         }

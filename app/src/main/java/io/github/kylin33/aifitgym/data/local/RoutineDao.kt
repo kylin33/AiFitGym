@@ -143,9 +143,6 @@ interface RoutineDao {
         return swapExercise(routineId, oldId, newId) + swapBackup(routineId, oldId, newId)
     }
 
-    @Query("SELECT COUNT(*) FROM routines WHERE presetKey IS NOT NULL AND archived = 0")
-    suspend fun presetCount(): Int
-
     @Query("SELECT COUNT(*) FROM routines WHERE archived = 0")
     suspend fun activeCount(): Int
 

@@ -42,7 +42,8 @@ class RoutineCategoryConverter {
  * 训练计划（一次训练要练哪几个动作）。
  *
  * 计划只是壳，「做几组、几次、歇多久」在 [RoutineExerciseEntity] 里。
- * [presetKey] 用来标记内置模板：启动时靠它去重，用户自建的计划这里是 null。
+ * [presetKey] 是历史字段：新装不再预置任何计划，只用来认早期版本灌进来的那几套模板
+ * （升级用户的库里还在），界面上据此标「内置模板」。新建的计划一律为 null。
  */
 @Serializable
 @Entity(
@@ -58,7 +59,7 @@ data class RoutineEntity(
     val updatedAt: Long = System.currentTimeMillis(),
     /** 归档后不出现在列表里，历史记录仍能引用。 */
     val archived: Boolean = false,
-    /** 内置模板的稳定标识（如 `preset_push_basics`），用户自建为 null。 */
+    /** 早期版本内置模板的稳定标识（如 `preset_push_basics`）；现在不再写入，新计划为 null。 */
     val presetKey: String? = null,
 )
 

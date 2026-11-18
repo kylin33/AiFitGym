@@ -15,8 +15,8 @@ import kotlinx.coroutines.launch
  * 本地库。四张业务表 —— 动作库、训练计划、计划条目、训练记录/明细 —— 加两张小表
  * （流派熟练度、键值元信息）。
  *
- * 首次建库时通过 [RoomDatabase.Callback.onCreate] 把内置动作库灌进去，见 [create]；
- * 内置计划模板由 [io.github.kylin33.aifitgym.data.seeding.PresetRoutineSeeder] 在启动时幂等补齐。
+ * 首次建库时通过 [RoomDatabase.Callback.onCreate] 把内置动作库灌进去，见 [create]。
+ * 计划表从空白开始：装好之后一套计划都没有，由用户自己排或让 AI 排。
  *
  * 版本历史：
  *  - v1 计划只有 position/sets/reps/restSeconds

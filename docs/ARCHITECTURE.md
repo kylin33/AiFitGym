@@ -17,7 +17,7 @@ README 只保留上手需要的信息，这里是实现层面的记录：为什�
 | `workout_sessions` | `WorkoutSessionLogEntity` | 一次训练一条，结算页汇总用 |
 | `workout_set_logs` | `WorkoutSetLogEntity` | 按「组」记录的打卡历史，`sessionId` 把同一次训练串起来 |
 | `branch_progress` | `BranchProgressEntity` | 技能树的解锁与等级进度 |
-| `app_meta` | `AppMetaEntity` | 键值表：导入条数、模板版本、检查点、AI 对话 |
+| `app_meta` | `AppMetaEntity` | 键值表：导入条数、检查点、AI 对话 |
 
 计划条目里 **计次和计时二选一**：`targetReps` 有值是计次动作（俯卧撑 12 次），
 `targetDurationSec` 有值是计时动作（平板支撑 45 秒）。两个都为空时按计次 10 兜底。
@@ -68,19 +68,22 @@ v1 → v2 时两张计划表都是空的，直接走 `fallbackToDestructiveMigra
 实测（Android 16 模拟器，debug 包）：**2303 条 / 2.6s（解析 1.2s + 写库 0.3s）**，
 二次启动直接读缓存库。首次会看到进度页，之后秒进。
 
-### 内置计划模板
+### 首启不预置计划
 
-`data/seeding/RoutinePresets.kt` 里三套，启动时由 `PresetRoutineSeeder` 幂等灌入：
+新装的 `routines` 表是空的。计划页显示一张空状态卡（`EmptyPlansCard`），给两条路：
+让 AI 按器械和近期记录排一套，或者自己从动作库挑。
 
-| 模板 | 类型 | 内容 |
-| --- | --- | --- |
-| 囚徒健身 · 基础推力日 | CALISTHENICS | 上斜俯卧撑 3×8 / 俯卧撑 4×10 / 派克俯卧撑 3×8 / 反向臂屈伸 3×10 / 平板支撑 3×45s |
-| 囚徒健身 · 基础拉力日 | CALISTHENICS | 反向划船 4×8 / 引体向上 4×5 / 屈膝反向划船 3×10 / 悬垂空心 3×25s |
-| Tabata 燃脂间歇 | HIIT_CARDIO | 波比 / 开合跳 / 高抬腿跑 / 登山者，各 8×20s，歇 10s |
+之前确实预置过三套（囚徒健身推力日 / 拉力日、Tabata 燃脂间歇），后来整套拆了。
+不预置的理由：
 
-灌入前用 `ExerciseDao.allIds()` 校验动作是否存在，缺动作的条目跳过、整条都缺的计划跳过，
-所以换动作包也不会灌出空计划。去重靠 `app_meta.preset_routines_version` 而不是「数一下有几个
-内置计划」—— 后者会让用户删掉的模板每次启动又回来。
+- 计划里真正起作用的是「他现在能练什么、练多少」，模板给的是别人的量；
+- 用户上手第一件事往往是删掉不符合器械的模板（没单杠就练不了引体向上），
+  删一遍比从空白开始更烦；
+- 模板会让「在原有计划上调整」失去参照 —— AI 到底是在改用户的计划，还是在改模板。
+
+`PresetRoutineSeeder` 与 `RoutinePresets` 已删除，`bootstrap()` 只剩「灌动作库、
+补技能树起点」两步。`routines.presetKey` 字段保留：升级用户库里那三套还在，
+界面据此标「内置」；新建计划一律为 null。清空数据也不再补计划，只补 6 条 Lv.1 账本。
 
 ---
 

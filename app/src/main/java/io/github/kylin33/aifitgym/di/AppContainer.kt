@@ -19,7 +19,6 @@ import io.github.kylin33.aifitgym.data.repo.HistoryRepository
 import io.github.kylin33.aifitgym.data.repo.RoutineRepository
 import io.github.kylin33.aifitgym.data.repo.WorkoutRepository
 import io.github.kylin33.aifitgym.data.seeding.CatalogueSeeder
-import io.github.kylin33.aifitgym.data.seeding.PresetRoutineSeeder
 import io.github.kylin33.aifitgym.data.skill.SkillRepository
 import io.github.kylin33.aifitgym.service.WorkoutTimerController
 import kotlinx.coroutines.CoroutineScope
@@ -187,16 +186,11 @@ class AppContainer(context: Context) {
         CoachChatStore(database.appMetaDao())
     }
 
-    /** 内置计划模板：动作库灌好之后才有得校验，所以放在 bootstrap 里串行执行。 */
-    private val presetRoutineSeeder: PresetRoutineSeeder by lazy {
-        PresetRoutineSeeder(database.routineDao(), database.exerciseDao(), database.appMetaDao())
-    }
-
     /**
      * 清空所有训练数据，回到刚装好的状态。
      *
-     * 依赖 [presetRoutineSeeder] 和 [skillRepository]，是因为清完要立刻把
-     * 「3 套模板 + 6 条 Lv.1 流派账本」补回来，而不是留一个空首页。
+     * 依赖 [skillRepository]，是因为清完要立刻把 6 条 Lv.1 流派账本补回来，
+     * 否则技能树会先空一下。计划不预置 —— 刚装好的状态本来就是「一套计划都没有」。
      */
     val dataResetRepository: DataResetRepository by lazy {
         DataResetRepository(
@@ -206,7 +200,6 @@ class AppContainer(context: Context) {
             routineDao = database.routineDao(),
             sessionDao = database.workoutSessionDao(),
             progressDao = database.branchProgressDao(),
-            presetSeeder = presetRoutineSeeder,
             skillRepository = skillRepository,
         )
     }
@@ -218,7 +211,6 @@ class AppContainer(context: Context) {
     fun bootstrap() {
         appScope.launch {
             catalogueSeeder.importInto(database)
-            presetRoutineSeeder.seedIfNeeded()
             // 技能树的起点解锁：纯本地、无网络，放在最后补齐
             skillRepository.ensureInitialized()
         }

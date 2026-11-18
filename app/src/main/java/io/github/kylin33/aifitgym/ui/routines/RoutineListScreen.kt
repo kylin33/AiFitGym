@@ -177,6 +177,10 @@ fun RoutineListScreen(
                 Spacer(Modifier.height(2.dp))
             }
 
+            item(key = "empty_plans") {
+                if (routines.isEmpty()) EmptyPlansCard(onOpenCoach = onOpenCoach)
+            }
+
             items(items = routines, key = { it.routine.routineId }) { summary ->
                 RoutineCard(
                     summary = summary,
@@ -350,11 +354,60 @@ private fun ResumeBanner(
 }
 
 /**
+ * 空状态：一套计划都没有时的引导。
+ *
+ * 这里刻意不放「一键生成三套模板」这类按钮 —— 计划是练什么、练多少的决定，
+ * 别人排好的东西用户不会照着做，反而会先删掉。给两条路：让 AI 按他的器械和最近的
+ * 记录排一套，或者自己从动作库里挑。
+ */
+@Composable
+private fun EmptyPlansCard(onOpenCoach: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 18.dp),
+    ) {
+        Text(
+            text = "还没有训练计划",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "这里没有预置模板。用什么动作、做多少组，按你手上的器械和现在的水平定。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = "· 让 AI 排一套：说清目标和能练的器械，它会连组数、休息、目标余力一起给",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "· 自己排：点右下角「新建计划」，从动作库里挑，可以边练边改",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            onClick = onOpenCoach,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+        ) {
+            Text("去和 AI 教练说 ›")
+        }
+    }
+}
+
+/**
  * AI 教练入口。
  *
  * 放在计划列表顶部而不是塞进「我的」：排计划这件事天然发生在这里 ——
  * 用户翻着计划想「今天该练什么」的时候，才是他最需要教练的时候。
- * 卡片做得很薄（一行标题 + 一行说明），不抢内置模板的位置。
+ * 卡片做得很薄（一行标题 + 一行说明），不抢计划列表的位置。
  */
 @Composable
 private fun CoachEntryCard(onClick: () -> Unit) {
