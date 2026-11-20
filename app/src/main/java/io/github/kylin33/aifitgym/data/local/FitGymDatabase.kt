@@ -28,6 +28,9 @@ import kotlinx.coroutines.launch
  *    `branch` + `skillLevel` 标记，条件（组数/目标值/口径）也存在动作行上；
  *    进度收成 `branch_progress` 六行（当前阶 + 经验）。见 [MIGRATION_5_6]。
  *  - v7 计划条目加 `targetRir`（目标强度），老计划为 null 表示「没规定」
+ *  - v8 组记录加 `restPlannedSec` / `restActualSec` / `targetReps` / `targetDurationSec`：
+ *    记下「这组之前歇了多久」与「当时目标是多少」。老记录这四列分别是 0/0/null/null，
+ *    统计里按「没有可比数据」跳过，不会把历史算成「全都没达标」。
  */
 @Database(
     entities = [
@@ -39,7 +42,7 @@ import kotlinx.coroutines.launch
         BranchProgressEntity::class,
         AppMetaEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(
@@ -91,7 +94,7 @@ abstract class FitGymDatabase : RoomDatabase() {
 
             database = Room.databaseBuilder(appContext, FitGymDatabase::class.java, NAME)
                 .addCallback(bootstrap)
-                .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 // 动作库是 assets 里的可再生数据，改结构时直接重建比写迁移划算；
                 // v5 之前的库进来会走这条（训练历史会丢，开发期可接受）
                 .fallbackToDestructiveMigration(dropAllTables = true)
@@ -218,6 +221,22 @@ abstract class FitGymDatabase : RoomDatabase() {
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `routine_exercises` ADD COLUMN `targetRir` INTEGER")
+            }
+        }
+
+        /**
+         * v7 → v8：组记录加休息时长与目标快照。
+         *
+         * 四列全可空或带 0 默认值，原地 ALTER 就够。老记录升级后是 0/0/null/null，
+         * 语义正好是「那次训练没量过这些东西」—— 统计层用 `targetReps IS NULL` 把它们排除，
+         * 而不是当成「一组都没达标」。
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `workout_set_logs` ADD COLUMN `restPlannedSec` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `workout_set_logs` ADD COLUMN `restActualSec` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `workout_set_logs` ADD COLUMN `targetReps` INTEGER")
+                db.execSQL("ALTER TABLE `workout_set_logs` ADD COLUMN `targetDurationSec` INTEGER")
             }
         }
     }

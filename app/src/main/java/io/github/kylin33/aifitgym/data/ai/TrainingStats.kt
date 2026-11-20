@@ -36,6 +36,13 @@ data class TrainingStats(
      * 模型看不出这个区别就会排出「昨天练胸，今天还练胸」。
      */
     val lastTrainedByBranch: Map<String, Int> = emptyMap(),
+    /**
+     * 各动作的达标率与实际休息。
+     *
+     * 这是「他练得轻不轻」唯一可量化的证据：做满了还提前起身，说明下次该加；
+     * 一直做不满、休息还要往长了加，说明强度排高了。
+     */
+    val progress: List<ExerciseProgress> = emptyList(),
 ) {
     val isEmpty: Boolean get() = last30.totalSets == 0
 
@@ -65,6 +72,12 @@ data class TrainingStats(
         if (trends.isNotEmpty()) {
             sb.append("动作表现（近 30 天每次训练的单场最好成绩，最多 4 次）：\n")
             trends.forEach { sb.append("  · ").append(it.describe()).append('\n') }
+        }
+        if (progress.isNotEmpty()) {
+            // 单独成段而不是并进上面：上面那段讲「成绩在涨还是掉」，
+            // 这段讲「练得轻不轻」，混在一起模型会把两个结论互相套用
+            sb.append("达标与休息（近 30 天，只算当时有计划目标的组）：\n")
+            progress.forEach { sb.append("  · ").append(it.describe()).append('\n') }
         }
         if (lastTrainedByBranch.isNotEmpty()) {
             val text = SkillBranch.entries.mapNotNull { branch ->
@@ -187,6 +200,43 @@ data class ExerciseTrend(
 }
 
 /**
+ * 一个动作的「练得轻不轻」。
+ *
+ * 只统计当时有计划目标的组（[trackedSets]）：老记录没有目标快照就不进来，
+ * 否则升级后的第一周，超额率会被几十条无目标的历史摊成 0。
+ */
+data class ExerciseProgress(
+    val exerciseId: String,
+    val name: String,
+    /** 有计划目标、且确实做了的组数。 */
+    val trackedSets: Int,
+    /** 做到或超过目标的组数。 */
+    val hitSets: Int,
+    /**
+     * 超过目标的组数。
+     *
+     * 计次动作的输入框默认就是目标次数，用户不主动往上调就永远是「刚好达标」，
+     * 所以「超额」比「达标」更能说明还有余力。计时动作到点自动完成，这里恒为 0。
+     */
+    val overSets: Int,
+    /** 组前面确实排了休息的组数。 */
+    val restSets: Int,
+    val restPlannedSum: Int,
+    val restActualSum: Int,
+) {
+    fun describe(): String {
+        val sb = StringBuilder(name)
+        sb.append(" 达标 ").append(hitSets).append('/').append(trackedSets)
+        if (overSets > 0) sb.append(" · 超额 ").append(overSets).append(" 组")
+        if (restSets > 0) {
+            sb.append(" · 平均歇 ").append(restActualSum / restSets)
+                .append(" 秒（计划 ").append(restPlannedSum / restSets).append("）")
+        }
+        return sb.toString()
+    }
+}
+
+/**
  * 纯计算部分，全部可单测 —— 统计口径是这份功能里最容易悄悄算错的东西，
  * 藏在数据库查询里就没法验证了。
  */
@@ -196,6 +246,12 @@ object TrainingStatsMath {
 
     /** 判趋势至少要有 3 个数据点，2 个点连成一条线说明不了任何事。 */
     const val MIN_TREND_POINTS = 3
+
+    /** 达标率至少要有 3 组有目标的数据才拿出来说。 */
+    const val MIN_PROGRESS_SETS = 3
+
+    /** 最多列 4 个动作：再多模型也读不住，还会让「先看哪个」变得随意。 */
+    const val MAX_PROGRESS = 4
 
     /** 本地自然日的序号，用来数「训练日」。用 UTC 会把凌晨的训练算到前一天。 */
     fun dayKey(millis: Long, zone: TimeZone = TimeZone.getDefault()): Int {
@@ -251,6 +307,41 @@ object TrainingStatsMath {
             ((now - rows.maxOf { it.startedAt }) / DAY_MS).toInt().coerceAtLeast(0)
         }
         .filterValues { it <= withinDays }
+
+    /**
+     * 把时间窗里的表现按动作汇总成「达标 / 超额 / 实际休息」。
+     *
+     * 门槛是 [minTrackedSets] 组有目标的数据：一两组说明不了节奏，
+     * 也容易让模型把一次偶然的超额当成「该加量了」。
+     * 排序按组数而不按超额率 —— 练得多的动作才是这套计划的主体。
+     */
+    fun progressOf(
+        performances: List<SessionPerformance>,
+        nameOf: Map<String, String>,
+        minTrackedSets: Int = MIN_PROGRESS_SETS,
+        max: Int = MAX_PROGRESS,
+    ): List<ExerciseProgress> = performances
+        .groupBy { it.exerciseId }
+        .mapNotNull { (id, rows) ->
+            val name = nameOf[id] ?: return@mapNotNull null
+            val tracked = rows.sumOf { it.trackedSets }
+            if (tracked < minTrackedSets) return@mapNotNull null
+            ExerciseProgress(
+                exerciseId = id,
+                name = name,
+                trackedSets = tracked,
+                hitSets = rows.sumOf { it.hitSets },
+                overSets = rows.sumOf { it.overSets },
+                restSets = rows.sumOf { it.restSets },
+                restPlannedSum = rows.sumOf { it.restPlannedSum },
+                restActualSum = rows.sumOf { it.restActualSum },
+            )
+        }
+        .sortedWith(
+            compareByDescending<ExerciseProgress> { it.trackedSets }
+                .thenByDescending { it.overSets },
+        )
+        .take(max)
 
     /**
      * 趋势判定。
@@ -317,6 +408,7 @@ class TrainingStatsBuilder(
             trends = buildTrends(performances, nameOf),
             daysSinceLast = ((now - lastDone) / day).toInt().coerceAtLeast(0),
             lastTrainedByBranch = TrainingStatsMath.lastTrainedDays(performances, branchOf, now),
+            progress = TrainingStatsMath.progressOf(performances, nameOf),
         )
     }
 

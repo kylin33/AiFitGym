@@ -32,6 +32,12 @@ class TrainingStatsTest {
         sets: Int,
         reps: Int,
         seconds: Int = 0,
+        trackedSets: Int = 0,
+        hitSets: Int = 0,
+        overSets: Int = 0,
+        restSets: Int = 0,
+        restPlannedSum: Int = 0,
+        restActualSum: Int = 0,
     ) = SessionPerformance(
         sessionId = sessionId,
         exerciseId = exerciseId,
@@ -39,6 +45,12 @@ class TrainingStatsTest {
         sets = sets,
         bestReps = reps,
         bestSeconds = seconds,
+        trackedSets = trackedSets,
+        hitSets = hitSets,
+        overSets = overSets,
+        restSets = restSets,
+        restPlannedSum = restPlannedSum,
+        restActualSum = restActualSum,
     )
 
     // ------------------------------------------------------------ 时间窗
@@ -184,5 +196,81 @@ class TrainingStatsTest {
         assertTrue(text.contains("2 天前"))
         // 30 天里 0 组的力量流派要点名，否则模型看不出偏科
         assertTrue(text.contains("核心"))
+    }
+
+    // ------------------------------------------------------------ 达标与休息
+
+    @Test
+    fun progress_needs_at_least_three_tracked_sets() {
+        val rows = listOf(
+            // 老记录：没有目标快照，trackedSets 是 0
+            perf(1, "A", noon - day, sets = 2, reps = 12, trackedSets = 2, hitSets = 2),
+            perf(2, "B", noon - day, sets = 3, reps = 10, trackedSets = 3, hitSets = 3),
+        )
+
+        val result = TrainingStatsMath.progressOf(rows, mapOf("A" to "俯卧撑", "B" to "深蹲"))
+
+        assertEquals(1, result.size)
+        assertEquals("深蹲", result[0].name)
+    }
+
+    @Test
+    fun progress_sums_across_sessions_and_keeps_rest_ratio() {
+        val rows = listOf(
+            perf(
+                1, "A", noon - 3 * day, sets = 3, reps = 12,
+                trackedSets = 3, hitSets = 3, overSets = 1,
+                restSets = 3, restPlannedSum = 270, restActualSum = 150,
+            ),
+            perf(
+                2, "A", noon - day, sets = 3, reps = 13,
+                trackedSets = 3, hitSets = 3, overSets = 2,
+                restSets = 3, restPlannedSum = 270, restActualSum = 156,
+            ),
+        )
+
+        val p = TrainingStatsMath.progressOf(rows, mapOf("A" to "俯卧撑")).single()
+
+        assertEquals(6, p.trackedSets)
+        assertEquals(6, p.hitSets)
+        assertEquals(3, p.overSets)
+        // 只做除法、不四舍五入：报「歇了 51 秒」比「51.2 秒」更像人话，误差也无所谓
+        assertEquals("俯卧撑 达标 6/6 · 超额 3 组 · 平均歇 51 秒（计划 90）", p.describe())
+    }
+
+    @Test
+    fun progress_omits_rest_part_when_nothing_recorded() {
+        val rows = listOf(perf(1, "A", noon, sets = 3, reps = 10, trackedSets = 3, hitSets = 2))
+
+        val p = TrainingStatsMath.progressOf(rows, mapOf("A" to "俯卧撑")).single()
+
+        assertEquals("俯卧撑 达标 2/3", p.describe())
+    }
+
+    @Test
+    fun prompt_text_lists_progress_below_trends() {
+        val stats = TrainingStats(
+            last7 = WindowStats(7, trainingDays = 2, sessions = 2, totalSets = 12, setsByBranch = mapOf("PUSH" to 12)),
+            prev7 = WindowStats(7),
+            last30 = WindowStats(30, trainingDays = 2, sessions = 2, totalSets = 12, setsByBranch = mapOf("PUSH" to 12)),
+            daysSinceLast = 1,
+            progress = listOf(
+                ExerciseProgress(
+                    exerciseId = "0001",
+                    name = "标准俯卧撑",
+                    trackedSets = 12,
+                    hitSets = 12,
+                    overSets = 3,
+                    restSets = 9,
+                    restPlannedSum = 810,
+                    restActualSum = 468,
+                ),
+            ),
+        )
+
+        val text = stats.toPromptText()
+
+        assertTrue(text.contains("达标与休息（近 30 天"))
+        assertTrue(text.contains("标准俯卧撑 达标 12/12 · 超额 3 组 · 平均歇 52 秒（计划 90）"))
     }
 }

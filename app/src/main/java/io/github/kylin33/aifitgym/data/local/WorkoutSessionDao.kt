@@ -53,6 +53,16 @@ data class SessionPerformance(
     val sets: Int,
     val bestReps: Int,
     val bestSeconds: Int,
+    /** 这一场里有目标可比对、且确实做了的组数；v8 之前的老记录为 0。 */
+    val trackedSets: Int = 0,
+    /** 其中做到或超过目标的组数。 */
+    val hitSets: Int = 0,
+    /** 其中超出目标的组数 —— 比达标更强的「还有余力」信号。 */
+    val overSets: Int = 0,
+    /** 有休息可算的组数（这组之前的休息计划秒数 > 0）。 */
+    val restSets: Int = 0,
+    val restPlannedSum: Int = 0,
+    val restActualSum: Int = 0,
 ) {
     /** 这次是计时动作还是计次动作。 */
     val isTimed: Boolean get() = bestSeconds > 0 && bestReps == 0
@@ -269,6 +279,12 @@ interface WorkoutSessionDao {
      *
      * 只多一个查询就把 7 天 / 30 天的训练日、组数、流派分布、表现趋势全部算完，
      * 不必让模型去读几百条原始组记录 —— 它数不准，也没那么多 token。
+     *
+     * 顺便把「达标 / 超额 / 实际休息」也算成聚合值：
+     *  - trackedSets 只数有目标快照的组，老记录（targetReps 为 null）不算，
+     *    否则升级当天的超额率会被历史数据摊成 0；
+     *  - restSets 只数「前面确实排了休息」的组，保证计划秒数与实际秒数同分母，
+     *    否则第一组（前面没休息）会把平均休息拉低。
      */
     @Query(
         """
@@ -277,7 +293,19 @@ interface WorkoutSessionDao {
                w.startTime AS startedAt,
                COUNT(*) AS sets,
                COALESCE(MAX(s.actualReps), 0) AS bestReps,
-               COALESCE(MAX(s.actualDurationSec), 0) AS bestSeconds
+               COALESCE(MAX(s.actualDurationSec), 0) AS bestSeconds,
+               SUM(CASE WHEN (s.targetReps IS NOT NULL AND s.actualReps > 0)
+                          OR (s.targetDurationSec IS NOT NULL AND s.actualDurationSec > 0)
+                        THEN 1 ELSE 0 END) AS trackedSets,
+               SUM(CASE WHEN (s.targetReps IS NOT NULL AND s.actualReps >= s.targetReps)
+                          OR (s.targetDurationSec IS NOT NULL AND s.actualDurationSec >= s.targetDurationSec)
+                        THEN 1 ELSE 0 END) AS hitSets,
+               SUM(CASE WHEN (s.targetReps IS NOT NULL AND s.actualReps > s.targetReps)
+                          OR (s.targetDurationSec IS NOT NULL AND s.actualDurationSec > s.targetDurationSec)
+                        THEN 1 ELSE 0 END) AS overSets,
+               SUM(CASE WHEN s.restPlannedSec > 0 THEN 1 ELSE 0 END) AS restSets,
+               SUM(CASE WHEN s.restPlannedSec > 0 THEN s.restPlannedSec ELSE 0 END) AS restPlannedSum,
+               SUM(CASE WHEN s.restPlannedSec > 0 THEN s.restActualSec ELSE 0 END) AS restActualSum
         FROM workout_set_logs s
         JOIN workout_sessions w ON w.sessionId = s.sessionId
         WHERE w.startTime >= :since AND w.startTime <= :until

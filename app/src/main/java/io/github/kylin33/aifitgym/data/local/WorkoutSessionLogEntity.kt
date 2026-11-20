@@ -79,4 +79,29 @@ data class WorkoutSetLogEntity(
     val actualDurationSec: Int = 0,
     /** 自觉用力程度 1~10，没问就是 null。 */
     val rpe: Int? = null,
+    /**
+     * 这组之前那次休息，计划多少秒。
+     *
+     * 和 [restActualSec] 成对存：只存「有没有跳过休息」的布尔，阈值就焊死在数据里了，
+     * 而「歇一半算不算提前」这种判断以后一定想改。0 表示前面没有休息（每组第一组）。
+     */
+    val restPlannedSec: Int = 0,
+    /**
+     * 同上，实际过了多少秒。
+     *
+     * 提前结束休息会明显小于 [restPlannedSec]，点过「+15 秒」则会大于 ——
+     * 两个方向都是信号（前者多半是「这组很轻松」，后者是「强度偏高或恢复不足」）。
+     * 存事实不存结论：一次提前可能只是赶时间，判断留给统计层和教练。
+     */
+    val restActualSec: Int = 0,
+    /**
+     * 当时界面上摆的那个目标次数 / 秒数快照。
+     *
+     * 必须快照，不能事后再去 join `routine_exercises`：计划会被改、会被删，
+     * 而「当时要求 10 次、他做了 15 次」这个对比一旦丢了就再也算不出来。
+     * 计划没规定时取的是界面默认值（计次 10、计时 30）—— 那正是用户当时看到的目标。
+     * null 表示这条记录没有可比的目标（考级模式、v8 之前的老记录）。
+     */
+    val targetReps: Int? = null,
+    val targetDurationSec: Int? = null,
 )

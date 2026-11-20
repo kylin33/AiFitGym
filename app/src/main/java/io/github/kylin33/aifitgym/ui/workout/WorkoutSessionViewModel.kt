@@ -150,17 +150,43 @@ data class WorkoutSessionState(
 
     val elapsedSec: Int get() = (elapsedMs / 1000L).toInt()
 
+    /**
+     * 休息中「接下来要做的那个动作」；不在休息、或还没做到最后一组时都是 null。
+     *
+     * 只有两种情况会非空：这一组是该动作的最后一组、且后面还有动作。
+     * 组间休息（同一动作的第 3→4 组）返回 null —— 那种休息不需要换画面。
+     * phase 放进判定里，是为了让调用方永远不用自己判断「现在是不是在休息」。
+     */
+    val upcomingEntry: WorkoutEntry?
+        get() {
+            if (phase != SessionPhase.RESTING) return null
+            val entry = current ?: return null
+            if (setIndex < entry.targetSets) return null
+            return entries.getOrNull(entryIndex + 1)
+        }
+
+    /** 休息时是否正在换动作：主视觉该切到下一个动作，提醒用户准备器械。 */
+    val restingIntoNext: Boolean
+        get() = upcomingEntry != null
+
+    /** 主视觉要画的条目：换动作的休息画下一个，其余画当前。 */
+    val displayEntry: WorkoutEntry?
+        get() = if (restingIntoNext) upcomingEntry else current
+
+    val displayExercise: ExerciseEntity?
+        get() = if (restingIntoNext) upcomingEntry?.exercise else currentExercise
+
     /** 休息时提示「下一组是什么」。 */
     val nextUpLabel: String?
         get() {
             val entry = current ?: return null
-            return if (setIndex < entry.targetSets) {
-                "${entry.exercise.name} · 第 ${setIndex + 1}/${entry.targetSets} 组"
-            } else {
-                entries.getOrNull(entryIndex + 1)?.let {
-                    "${it.exercise.name} · 第 1/${it.targetSets} 组"
-                }
+            if (restingIntoNext) {
+                val next = upcomingEntry ?: return null
+                return "${next.exercise.name} · 第 1/${next.targetSets} 组"
             }
+            if (setIndex >= entry.targetSets) return null
+            val name = (displayExercise ?: entry.exercise).name
+            return "$name · 第 ${setIndex + 1}/${entry.targetSets} 组"
         }
 }
 
@@ -193,6 +219,20 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
     private var phaseDeadline = 0L
     private var lastBeepSec = -1
     private var ticker: Job? = null
+
+    /**
+     * 本次休息的开始时刻（elapsedRealtime）；0 表示当前不在休息。
+     *
+     * 实际休息时长在**离开休息时**结算，不能等下一组做完再算 —— 那样会把
+     * 3 秒准备和整组时长（几十秒）一起算成休息，数据直接失真。
+     */
+    private var restStartedAt = 0L
+
+    /** 上一次休息计划多少秒，等下一组落库时一起写进去。 */
+    private var restPlannedSec = 0
+
+    /** 刚结束的那次休息实际持续了几秒，随下一组落库后清零。 */
+    private var restActualSec = 0
 
     /** 上一次推给通知栏的快照指纹，用来把 80ms 的 tick 压成「有变化才推」。 */
     private var timerKey: String? = null
@@ -341,6 +381,7 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
             // 把「已经练了多久」接上，但把关机的那段时间扣掉：
             // 用墙上时间算差值的话，第二天打开会显示练了 14 个小时
             startedAt = SystemClock.elapsedRealtime() - checkpoint.elapsedMs
+            resetRestTracking()
 
             _state.value = WorkoutSessionState(
                 phase = SessionPhase.ACTIVE_SET,
@@ -375,6 +416,7 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
         sessionId = newSessionId
         startedAt = SystemClock.elapsedRealtime()
         startedAtWall = now
+        resetRestTracking()
         _state.value = WorkoutSessionState(
             phase = SessionPhase.ACTIVE_SET,
             routineId = routineId,
@@ -475,6 +517,15 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
             this[exercise.id] = (this[exercise.id] ?: 0) + 1
         }
 
+        // 这组之前那次休息（第一组前面没有休息，两个都是 0）；
+        // 目标是「界面上摆的那个数」——计划没规定时 plannedReps 会给默认值，那也正是用户看到的
+        val restPlanned = restPlannedSec
+        val restActual = restActualSec
+        val targetReps = if (timed) null else entry.plannedReps
+        val targetSeconds = if (timed) entry.plannedSeconds else null
+        restPlannedSec = 0
+        restActualSec = 0
+
         phaseDeadline = 0L
         _state.update {
             it.copy(logs = it.logs + log, volume = volume, remainingMs = 0L, phaseTotalMs = 0L)
@@ -489,6 +540,10 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
                     setIndex = snapshot.setIndex,
                     reps = reps,
                     seconds = seconds,
+                    restPlannedSec = restPlanned,
+                    restActualSec = restActual,
+                    targetReps = targetReps,
+                    targetDurationSec = targetSeconds,
                 )
             }.onFailure {
                 _state.update { it.copy(saveError = "有一组没能存进训练记录，历史里可能少一组") }
@@ -511,16 +566,41 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
         startRest(entry.restSeconds)
     }
 
+    /**
+     * 新训练 / 恢复训练开始时，清掉上一次训练残留的休息计时。
+     *
+     * 不清的话，上一场最后歇到一半就退出的那 40 秒会挂到新一场的第一组上，
+     * 记录里就出现「第一组前面歇了 40 秒」这种不存在的事。
+     * 恢复训练时同样清零：休息剩余时间本来就不恢复（身体早缓过来了）。
+     */
+    private fun resetRestTracking() {
+        restStartedAt = 0L
+        restPlannedSec = 0
+        restActualSec = 0
+    }
+
     private fun startRest(seconds: Int) {
         if (seconds <= 0) {
             advanceToNextSet()
             return
         }
+        restPlannedSec = seconds
+        restStartedAt = SystemClock.elapsedRealtime()
         beginPhase(SessionPhase.RESTING, seconds * 1000L)
     }
 
     private fun advanceToNextSet() {
         val snapshot = _state.value
+
+        // 离开休息时结算实际休息时长（自然走完、提前跳过、点「+15 秒」都走这里）。
+        // 不放在「下一组完成时」算：那样会把 3 秒准备和整组时长一起算成休息。
+        if (snapshot.phase == SessionPhase.RESTING && restStartedAt > 0L) {
+            restActualSec = ((SystemClock.elapsedRealtime() - restStartedAt) / 1000L)
+                .toInt()
+                .coerceIn(0, MAX_REST_SEC)
+            restStartedAt = 0L
+        }
+
         val entry = snapshot.current ?: return finishSession()
 
         phaseDeadline = 0L
@@ -880,7 +960,8 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
             )
 
             SessionPhase.RESTING -> TimerSnapshot(
-                title = "组间休息",
+                // 换动作的那种休息单独说一声：锁屏时看不见下一张图，标题是唯一线索
+                title = if (snapshot.restingIntoNext) "休息 · 换下一个动作" else "组间休息",
                 subtitle = snapshot.nextUpLabel?.let { "接下来 $it" } ?: "马上结束",
                 subText = subText,
                 deadline = phaseDeadline,
@@ -918,5 +999,13 @@ class WorkoutSessionViewModel(container: AppContainer) : ViewModel() {
 
         const val LAST_BEEP_SEC = 3
         const val EXTEND_REST_SEC = 15
+
+        /**
+         * 单次休息记到 15 分钟就到顶。
+         *
+         * 「+15 秒」可以一直点下去，理论上能歇一小时；真出现那种数字，多半是人走开了、
+         * 手机还亮着。记成 900 比记成 3600 更接近事实，也不会让统计里的平均值被一条记录带飞。
+         */
+        const val MAX_REST_SEC = 900
     }
 }

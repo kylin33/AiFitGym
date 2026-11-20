@@ -218,6 +218,12 @@ class WorkoutRepository(
         reps: Int,
         seconds: Int,
         rpe: Int? = null,
+        /** 这组之前那次休息：计划秒数 / 实际秒数，前面没休息就都是 0。 */
+        restPlannedSec: Int = 0,
+        restActualSec: Int = 0,
+        /** 当时那套计划的目标值快照；没规定就 null。 */
+        targetReps: Int? = null,
+        targetDurationSec: Int? = null,
     ): Long = sessionDao.insertSet(
         WorkoutSetLogEntity(
             sessionId = sessionId,
@@ -226,6 +232,10 @@ class WorkoutRepository(
             actualReps = reps,
             actualDurationSec = seconds,
             rpe = rpe,
+            restPlannedSec = restPlannedSec.coerceAtLeast(0),
+            restActualSec = restActualSec.coerceAtLeast(0),
+            targetReps = targetReps,
+            targetDurationSec = targetDurationSec,
         )
     )
 

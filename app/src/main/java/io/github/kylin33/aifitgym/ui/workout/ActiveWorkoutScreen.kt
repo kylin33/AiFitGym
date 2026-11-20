@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import io.github.kylin33.aifitgym.data.ai.RirPolicy
 import io.github.kylin33.aifitgym.data.anatomy.MuscleScoring
 import io.github.kylin33.aifitgym.data.repo.PrMetric
+import io.github.kylin33.aifitgym.data.repo.WorkoutEntry
 import io.github.kylin33.aifitgym.ui.components.CountdownRing
 import io.github.kylin33.aifitgym.ui.components.ExerciseImage
 import io.github.kylin33.aifitgym.ui.components.MuscleHeatmap
@@ -193,7 +194,10 @@ private fun SessionBody(
     onRequestExit: () -> Unit,
 ) {
     val entry = state.current
-    val exercise = state.currentExercise
+    // 换动作的休息期间，主视觉提前切到下一个动作 —— 否则用户盯着刚做完的动作
+    // 歇完 90 秒，抬头才发现要换器械
+    val shownEntry = state.displayEntry
+    val exercise = state.displayExercise
     val taxonomy = rememberMuscleTaxonomy()
 
     val muscleScores = remember(taxonomy, exercise) {
@@ -207,8 +211,13 @@ private fun SessionBody(
             elapsedSec = state.elapsedSec,
             progress = state.progress,
             meta = buildString {
-                append("第 ${state.entryIndex + 1}/${state.entries.size} 个动作")
-                entry?.let { append(" · 第 ${state.setIndex}/${it.targetSets} 组") }
+                if (state.restingIntoNext && shownEntry != null) {
+                    append("下一个 · 第 ${state.entryIndex + 2}/${state.entries.size} 个动作")
+                    append(" · ${shownEntry.targetSets} 组")
+                } else {
+                    append("第 ${state.entryIndex + 1}/${state.entries.size} 个动作")
+                    entry?.let { append(" · 第 ${state.setIndex}/${it.targetSets} 组") }
+                }
             },
             counter = "已完成 ${state.completedSets}/${state.totalSets} 组",
             onRequestExit = onRequestExit,
@@ -231,21 +240,32 @@ private fun SessionBody(
             )
 
             exercise?.let { current ->
-                Text(
-                    text = current.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                Column(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(12.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
                         .padding(horizontal = 10.dp, vertical = 6.dp),
-                )
+                ) {
+                    if (state.restingIntoNext) {
+                        Text(
+                            text = "下一个动作",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
+                    Text(
+                        text = current.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
 
-            if (entry?.backup != null) {
+            if (!state.restingIntoNext && entry?.backup != null) {
                 val label = if (state.useBackup) {
                     "切回 ${entry.exercise.name}"
                 } else {
@@ -534,6 +554,13 @@ private fun RepsStepButton(symbol: String, filled: Boolean, onClick: () -> Unit)
     }
 }
 
+/** 「3 组 × 12 次 · 留 2 次余力」：休息页预告下一项用。 */
+private fun targetSummary(entry: WorkoutEntry): String = buildString {
+    append(entry.targetSets).append(" 组 × ")
+    append(if (entry.isTimed) "${entry.plannedSeconds} 秒" else "${entry.plannedReps} 次")
+    entry.targetRir?.let { append(" · 留 ").append(it).append(" 次余力") }
+}
+
 @Composable
 private fun RestPanel(
     state: WorkoutSessionState,
@@ -551,12 +578,31 @@ private fun RestPanel(
         )
 
         Spacer(Modifier.height(6.dp))
-        Text(
-            text = state.nextUpLabel?.let { "接下来 $it" } ?: "马上结束",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
+        val upcoming = state.upcomingEntry
+        if (upcoming != null) {
+            // 换动作：图上已经是下一个动作了，这里补一句「歇完从第 1 组开始」和它的目标
+            Text(
+                text = "歇完开始 ${upcoming.exercise.name}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = targetSummary(upcoming),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            Text(
+                text = state.nextUpLabel?.let { "接下来 $it" } ?: "马上结束",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
         Spacer(Modifier.height(10.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
