@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
         BranchProgressEntity::class,
         AppMetaEntity::class,
     ],
-    version = 8,
+    version = FitGymDatabase.DB_VERSION,
     exportSchema = true,
 )
 @TypeConverters(
@@ -64,6 +64,15 @@ abstract class FitGymDatabase : RoomDatabase() {
     companion object {
         private const val TAG = "FitGymDatabase"
         private const val NAME = "fitgym.db"
+
+        /**
+         * 当前库版本。
+         *
+         * 单独提出来给 `@Database(version = ...)` 用，是因为 `@Database` 是 BINARY 保留的注解，
+         * 运行期读不到 —— 而单测必须能拿到这个数字，才能核对「代码里的版本」和
+         * `app/schemas/` 里最新的一份 schema 是不是同一个。改版本号只改这里，别在注解里写死。
+         */
+        internal const val DB_VERSION: Int = 8
 
         /**
          * @param scope 应用级协程作用域（IO），用于在后台完成首启导入。
@@ -94,10 +103,18 @@ abstract class FitGymDatabase : RoomDatabase() {
 
             database = Room.databaseBuilder(appContext, FitGymDatabase::class.java, NAME)
                 .addCallback(bootstrap)
-                .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
-                // 动作库是 assets 里的可再生数据，改结构时直接重建比写迁移划算；
-                // v5 之前的库进来会走这条（训练历史会丢，开发期可接受）
-                .fallbackToDestructiveMigration(dropAllTables = true)
+                .addMigrations(*ALL_MIGRATIONS)
+                // 只允许 v1~v4 的库被重建。
+                //
+                // 那四个版本从没发布过，只存在于开发机和测试机上，为它们补四条没人用得上的
+                // 迁移不划算，所以建库时整库重建（训练历史一起没了，但那里本来也没有真数据）。
+                //
+                // 关键在「只允许这几个起点」：`fallbackToDestructiveMigration(...)` 会把
+                // requireMigration 整体关掉，等于以后任何一次漏写迁移都静默删库；而
+                // `fallbackToDestructiveMigrationFrom(...)` 只把指定起点加进白名单，
+                // v5 之后找不到迁移路径时 Room 照旧抛 IllegalStateException —— 闪退有反馈、
+                // 数据还在文件里，补一条迁移就能救回来，比悄悄清空用户半年的记录好得多。
+                .fallbackToDestructiveMigrationFrom(true, *DESTRUCTIVE_START_VERSIONS)
                 .build()
 
             return database
@@ -239,5 +256,24 @@ abstract class FitGymDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `workout_set_logs` ADD COLUMN `targetDurationSec` INTEGER")
             }
         }
+
+        /**
+         * 允许「不写迁移、直接重建」的起点版本。
+         *
+         * 只有 v1~v4 —— 那四个版本从没发布过，库结构对不上时重建比补迁移划算，
+         * 重建丢掉的也只是开发机上的假数据。这个数组同时是给 [MigrationChainTest]
+         * 用的断言依据：除它之外，任意两级之间缺迁移都算 bug。
+         */
+        internal val DESTRUCTIVE_START_VERSIONS = intArrayOf(1, 2, 3, 4)
+
+        /**
+         * 全部手写迁移。
+         *
+         * 顺序无所谓（Room 按 from/to 自己找路径），但起点必须覆盖 [DESTRUCTIVE_START_VERSIONS]
+         * 之外的每一级 —— 缺一级，从那一级升上来的用户就会在启动时崩。这条约束由
+         * `MigrationChainTest` 盯着，它还会解析 `app/schemas` 下导出的 json 核对加的列在不在。
+         */
+        internal val ALL_MIGRATIONS: Array<Migration> =
+            arrayOf(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
     }
 }

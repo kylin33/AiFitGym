@@ -136,6 +136,19 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --console=plain
 
+      # 实体改了但忘了升 DB_VERSION 时，KSP 会把已提交的 schema 覆盖成新结构，
+      # 而单测只看「代码里的版本 vs 最新 schema」，两边一起停留在旧版本时它看不出来。
+      # 在构建之后直接比 git 状态：已跟踪的 schema 被改写 = 漏升版本；新出现的文件 = 正常新增版本。
+      - name: Guard database schema
+        run: |
+          changed="$(git status --porcelain -- app/schemas | grep -v '^??' || true)"
+          if [ -n "$changed" ]; then
+            echo "::error::app/schemas 里已提交的 schema 被改写，说明实体改了但 FitGymDatabase.DB_VERSION 没升"
+            echo "$changed"
+            exit 1
+          fi
+          echo "schema 与已提交的一致"
+
       - name: Build release APK
         run: ./gradlew :app:assembleRelease --console=plain
 

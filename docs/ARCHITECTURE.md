@@ -45,10 +45,20 @@ README 只保留上手需要的信息，这里是实现层面的记录：为什�
 | v7 | 计划条目加 `targetRir`（目标强度），老计划为 null |
 | v8 | 组记录加实际休息与实际目标（`restPlannedSec` / `restActualSec` / `targetReps` / `targetDurationSec`） |
 
-v1 → v2 时两张计划表都是空的，直接走 `fallbackToDestructiveMigration`。之后的迁移都在
-`FitGymDatabase` 里手写（`MIGRATION_5_6` / `MIGRATION_6_7` / `MIGRATION_7_8`）：用户已经有计划和训练历史了，
-破坏性迁移意味着把人练了半年的记录清空。只加可空列时用 `ALTER TABLE` 就够，不用重建表。
-导出的 schema 在 `app/schemas/`，改表结构时别忘了一起提交 —— 否则升级时 Room 校验不过，直接崩。
+v1 → v2 时两张计划表都是空的，那时允许直接重建。现在的策略是「只给没发布过的版本开后门」：
+
+```kotlin
+.fallbackToDestructiveMigrationFrom(true, *DESTRUCTIVE_START_VERSIONS) // 只有 v1~v4
+```
+
+`fallbackToDestructiveMigration(...)` 会把 `requireMigration` 整体关掉 —— 以后任何一次漏写迁移
+都会静默删库，用户的训练历史跟着没。换成 `From` 版本只把 v1~v4 这几个从没发布过的起点列入白名单，
+v5 之后找不到迁移路径时 Room 照旧抛 `IllegalStateException`：闪退有反馈、数据还在文件里，
+补一条迁移就能救回来。宁可崩，也不要悄悄清空别人练了半年的记录。
+
+迁移都在 `FitGymDatabase` 里手写（`MIGRATION_5_6` / `MIGRATION_6_7` / `MIGRATION_7_8`），
+只加可空列时用 `ALTER TABLE` 就够，不用重建表。改表结构的完整规矩见
+[DEVELOPMENT.md](DEVELOPMENT.md#改数据库结构)，`MigrationChainTest` 会在单测阶段把这些规矩验一遍。
 
 ### 首启导入
 
