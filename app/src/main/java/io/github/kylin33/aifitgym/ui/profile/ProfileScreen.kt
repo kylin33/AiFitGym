@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -90,6 +91,7 @@ fun ProfileScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showClipClear by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val appVersion = rememberAppVersion()
     // 按需下载的演示短片存在私有目录，用户既看不到也删不掉，给一个能看占用、能清空的入口
     val clipStore = rememberClipStore()
     val localClips by clipStore.local.collectAsStateWithLifecycle()
@@ -220,6 +222,7 @@ fun ProfileScreen(
                         icon = Icons.Filled.Info,
                         title = "关于 FitGym",
                         subtitle = "版本、动作库与数据说明",
+                        trailing = "v${appVersion.name}",
                         onClick = { showAbout = true },
                     )
                     HorizontalDivider(
@@ -282,6 +285,7 @@ fun ProfileScreen(
     if (showAbout) {
         AboutDialog(
             exerciseCount = exerciseCount,
+            version = appVersion,
             onOpenPrivacy = {
                 showAbout = false
                 onOpenPrivacy()
@@ -495,9 +499,33 @@ private fun NotificationRow() {
     )
 }
 
+/**
+ * 装在这台手机上的版本。
+ *
+ * 走 PackageManager 而不是 BuildConfig：debug 包的 `versionNameSuffix = "-debug"` 是打包时才拼上去的，
+ * 只有系统里那份 PackageInfo 才和用户在「应用信息」里看到的一字不差 —— 报问题时两个数字对得上，
+ * 才不用猜他装的是哪个包。
+ */
+private data class AppVersion(val name: String, val code: Long)
+
+@Composable
+private fun rememberAppVersion(): AppVersion {
+    val context = LocalContext.current
+    return remember(context) {
+        runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            AppVersion(
+                name = info.versionName.orEmpty().ifBlank { "未知" },
+                code = PackageInfoCompat.getLongVersionCode(info),
+            )
+        }.getOrDefault(AppVersion(name = "未知", code = 0))
+    }
+}
+
 @Composable
 private fun AboutDialog(
     exerciseCount: Int,
+    version: AppVersion,
     onOpenPrivacy: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -506,6 +534,11 @@ private fun AboutDialog(
         title = { Text("关于 FitGym") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "版本 ${version.name} · 构建 ${version.code}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.outline,
+                )
                 Text(
                     text = "内置动作库 $exerciseCount 个，按部位和器械筛选，徒手动作优先。",
                     style = MaterialTheme.typography.bodySmall,

@@ -36,8 +36,12 @@ android {
         applicationId = "io.github.kylin33.aifitgym"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // 版本号是给开发期对比用的，不跟 tag 绑定：每完成一批改动就往上加一位 patch，
+        // 装到手机上在「关于」里能直接看到，用来确认两台机 / 两个包是不是同一批。
+        // versionCode 用 major * 10000 + minor * 100 + patch（1.0.2 → 10002），
+        // 保持单调递增就够了 —— 只有它影响系统能否覆盖安装。
+        versionCode = 10002
+        versionName = "1.0.2"
     }
 
     signingConfigs {
